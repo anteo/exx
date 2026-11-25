@@ -1,28 +1,32 @@
-"""Register contracts, structured control flow and Z80 lowering for EXX."""
+"""Register contracts, structured control flow and platform lowering for EXX."""
 
 from collections import deque
 from dataclasses import dataclass
 
-from . import z80
-from .syntax import ExxError, parse
+from .diagnostics import ExxError
+from .parser import parse
+from .ir import Instruction, Operand, TargetError
+from .registry import platforms
+from .syntax import Stmt
 
 
 @dataclass
 class Procedure:
     name: str
-    instructions: tuple[z80.Instruction, ...]
+    instructions: tuple[Instruction, ...]
     externals: set[str]
+    platform: str
 
 
 @dataclass
 class Step:
-    instruction: z80.Instruction
+    instruction: Instruction
     line: int
     kills: frozenset = frozenset()
 
 
-def parts(names):
-    return frozenset().union(*(z80.resources(name) for name in names))
+def parts(cpu, names):
+    return frozenset().union(*(cpu.resources(name) for name in names))
 
 
 def elements(expr):
@@ -31,49 +35,61 @@ def elements(expr):
     return expr.args if expr.kind == "tuple" else (expr,)
 
 
-def validate_group(names, line, allow_group=False):
+def validate_group(cpu, names, line, allow_group=False):
     used = set()
     for name in names:
-        locations = z80.resources(name)
-        if name == "SP":
-            raise ExxError(line, "SP is reserved for balanced procedure calls")
-        if not locations or (not allow_group and z80.register(name) is None):
+        locations = cpu.resources(name)
+        if name in cpu.reserved_abi:
+            raise ExxError(line, cpu.reserved_abi[name])
+        if not locations or (not allow_group and cpu.register(name) is None):
             raise ExxError(line, f"unknown ABI register {name}")
         if used & locations:
             raise ExxError(line, f"overlapping ABI locations at {name}")
         used.update(locations)
 
 
-def signatures(program):
-    found = {}
+def abi_key(cpu, proc):
+    inputs = tuple((p.register, p.type_name) for p in proc.params)
+    return inputs, proc.outputs, parts(cpu, proc.clobbers) - parts(cpu, proc.outputs)
+
+
+def collect_signatures(cpu, program, found, *, interface=False):
     for proc in program.procs:
-        if proc.name in found:
-            raise ExxError(proc.line, f"duplicate declaration of {proc.name}")
+        if interface and proc.body is not None:
+            raise ExxError(proc.line, "a shared ABI file may only contain extern declarations")
         if proc.name.lower().startswith("exx__"):
             raise ExxError(proc.line, "the exx__ prefix is reserved for generated labels")
-        validate_group((p.register for p in proc.params), proc.line)
-        validate_group(proc.outputs, proc.line)
-        validate_group(proc.clobbers, proc.line, allow_group=True)
+        validate_group(cpu, (p.register for p in proc.params), proc.line)
+        validate_group(cpu, proc.outputs, proc.line)
+        validate_group(cpu, proc.clobbers, proc.line, allow_group=True)
         names = set()
         for p in proc.params:
-            if p.name in names or (z80.resources(p.name) and p.name != p.register):
+            if p.name in names or (cpu.resources(p.name) and p.name != p.register):
                 raise ExxError(p.line, f"invalid or duplicate parameter name {p.name}")
-            if p.type_name and not z80.supports_layout(p.register):
-                raise ExxError(p.line, "an EXX structure pointer requires IX or IY")
+            if p.type_name and p.register not in cpu.layout_registers:
+                raise ExxError(p.line, "an EXX structure pointer requires " + " or ".join(cpu.layout_registers))
             names.add(p.name)
-        found[proc.name] = proc
-    return found
+        previous = found.get(proc.name)
+        if previous is not None:
+            if abi_key(cpu, previous) != abi_key(cpu, proc):
+                raise ExxError(proc.line, f"incompatible ABI for {proc.name}")
+            if previous.body is not None and proc.body is not None:
+                raise ExxError(proc.line, f"duplicate definition of {proc.name}")
+        if previous is None or proc.body is not None:
+            found[proc.name] = proc
 
 
 class Lowering:
-    def __init__(self, proc, symbols):
+    def __init__(self, proc, symbols, cpu):
+        self.cpu = cpu
         self.proc = proc
         self.symbols = symbols
         self.aliases = {p.name: (p.register, p.type_name) for p in proc.params}
+        self.layouts = {p.register: p.type_name for p in proc.params if p.type_name}
         self.steps = []
         self.externals = set()
         self.counter = 0
-        self.writable = parts(proc.outputs + proc.clobbers)
+        self.writable = parts(cpu, proc.outputs + proc.clobbers)
 
     def label(self):
         self.counter += 1
@@ -83,28 +99,32 @@ class Lowering:
         self.steps.append(Step(ins, line, kills))
 
     def mark(self, label, line):
-        self.emit(z80.Instruction("label", (label,)), line)
+        self.emit(Instruction("label", (label,)), line)
 
     def operand(self, expr):
         if expr.kind == "name":
             if expr.value in self.aliases:
-                return z80.register(self.aliases[expr.value][0])
-            reg = z80.register(expr.value)
+                return self.cpu.register(self.aliases[expr.value][0])
+            reg = self.cpu.register(expr.value)
             if reg:
                 return reg
+            if expr.value in self.cpu.unsupported_registers:
+                raise ExxError(expr.line, f"unsupported {self.cpu.name.upper()} register {expr.value}")
             # Constants and assembler structure offsets remain symbolic.
             if expr.value.split(".")[0].isupper():
-                return z80.Operand("imm", expr.value)
+                return Operand("imm", expr.value)
             raise ExxError(expr.line, f"unknown name {expr.value}")
+        if expr.kind == "assign":
+            raise ExxError(expr.line, "parenthesized assignment is only supported in conditions")
         if expr.kind == "int":
-            return z80.Operand("imm", str(expr.value))
+            return Operand("imm", str(expr.value))
         if expr.kind == "field":
             base = expr.args[0]
             if base.kind == "name" and base.value in self.aliases:
                 reg, layout = self.aliases[base.value]
                 if layout:
-                    return z80.field_operand(reg, layout, expr.value)
-            raise ExxError(expr.line, "field access requires a typed IX or IY binding")
+                    return self.cpu.field_operand(reg, layout, expr.value)
+            raise ExxError(expr.line, "field access requires a typed " + " or ".join(self.cpu.layout_registers) + " binding")
         if expr.kind == "unary" and expr.value in ("+", "-"):
             src = self.operand(expr.args[0])
             if src.kind == "imm":
@@ -114,7 +134,7 @@ class Lowering:
                     text = str(-int(src.text))
                 except ValueError:
                     text = f"(-{src.text})"
-                return z80.Operand("imm", text)
+                return Operand("imm", text)
         if expr.kind == "binary" and expr.value in ("+", "-", "^"):
             left, right = (self.operand(x) for x in expr.args)
             if left.kind == right.kind == "imm":
@@ -124,8 +144,18 @@ class Lowering:
                     text = f"({left.text} {expr.value} {right.text})"
                 else:
                     text = str({"+": a + b, "-": a - b, "^": a ^ b}[expr.value])
-                return z80.Operand("imm", text)
+                return Operand("imm", text)
         raise ExxError(expr.line, "this expression needs an explicit destination register")
+
+    def condition_operand(self, expr):
+        if expr.kind != "assign":
+            return self.operand(expr)
+        target, rhs = expr.args
+        dst = self.operand(target)
+        if dst.kind != "reg":
+            raise ExxError(expr.line, "a condition assignment requires a register")
+        self.assign(Stmt("assign", expr.line, rhs, target=target, op="="))
+        return dst
 
     def target_code(self, instructions, line):
         for ins in instructions:
@@ -146,9 +176,13 @@ class Lowering:
                 self.mark(skip, expr.line)
         else:
             comparison = expr.kind == "binary" and expr.value in ("==", "!=", "<", ">", "<=", ">=")
-            left = self.operand(expr.args[0] if comparison else expr)
-            right = self.operand(expr.args[1]) if comparison else None
-            self.target_code(z80.branch(left, expr.value if comparison else None, right,
+            left = self.condition_operand(expr.args[0] if comparison else expr)
+            start = len(self.steps)
+            right = self.condition_operand(expr.args[1]) if comparison else None
+            for step in self.steps[start:]:
+                if self.cpu.operand_reads(left) & (step.instruction.writes | step.kills):
+                    raise ExxError(expr.line, "right operand overwrites the left operand; use an explicit move")
+            self.target_code(self.cpu.branch(left, expr.value if comparison else None, right,
                                         label, truth, new_label=self.label), expr.line)
 
     def call(self, expr, targets=None, tail=False):
@@ -159,23 +193,22 @@ class Lowering:
             raise ExxError(expr.line, f"{callee.name} expects {len(callee.params)} arguments")
         for arg, param in zip(expr.args, callee.params):
             loc = self.operand(arg)
-            if loc != z80.register(param.register):
+            if loc != self.cpu.register(param.register):
                 raise ExxError(arg.line, f"{callee.name}: {param.name} expects {param.register}, got {loc.text}")
-            if param.type_name and arg.kind == "name" and arg.value in self.aliases:
-                layout = self.aliases[arg.value][1]
-                if layout and layout != param.type_name:
-                    raise ExxError(arg.line, f"{param.name} requires layout {param.type_name}, got {layout}")
+            if param.type_name and self.layouts.get(loc.text) != param.type_name:
+                layout = self.layouts.get(loc.text, "untyped register")
+                raise ExxError(arg.line, f"{param.name} requires layout {param.type_name}, got {layout}")
         if targets is not None:
             actual = tuple(self.operand(t) for t in targets)
-            if actual != tuple(z80.register(o) for o in callee.outputs):
+            if actual != tuple(self.cpu.register(o) for o in callee.outputs):
                 raise ExxError(expr.line, f"{callee.name} returns ({', '.join(callee.outputs)}); capture the declared locations")
         if tail and self.proc.outputs != callee.outputs:
             raise ExxError(expr.line, f"tail call to {callee.name} has incompatible results")
         if callee.body is None:
             self.externals.add(callee.name)
-        reads = parts(p.register for p in callee.params)
-        self.emit(z80.Instruction("tail" if tail else "call", (callee.name,), reads,
-                                  parts(callee.outputs)), expr.line, parts(callee.clobbers))
+        reads = parts(self.cpu, (p.register for p in callee.params))
+        self.emit(self.cpu.call(callee.name, reads, parts(self.cpu, callee.outputs), tail),
+                  expr.line, parts(self.cpu, callee.clobbers))
 
     def assign(self, stmt):
         rhs = stmt.value
@@ -186,17 +219,17 @@ class Lowering:
         if dst.kind not in ("reg", "mem", "flag"):
             raise ExxError(stmt.line, "assignment requires a writable location")
         if stmt.op != "=":
-            code = z80.binary(dst, stmt.op, self.operand(rhs))
+            code = self.cpu.binary(dst, stmt.op, self.operand(rhs))
         elif rhs.kind == "binary" and rhs.value in ("+", "-", "^"):
             left, right = (self.operand(x) for x in rhs.args)
             if left.kind == right.kind == "imm":
-                code = z80.move(dst, self.operand(rhs))
+                code = self.cpu.move(dst, self.operand(rhs))
             elif left == dst:
-                code = z80.binary(dst, rhs.value, right)
+                code = self.cpu.binary(dst, rhs.value, right)
             else:
                 raise ExxError(stmt.line, f"assign the left operand to {dst.text} explicitly first")
         else:
-            code = z80.move(dst, self.operand(rhs))
+            code = self.cpu.move(dst, self.operand(rhs))
         self.target_code(code, stmt.line)
 
     def returns(self, stmt):
@@ -207,19 +240,19 @@ class Lowering:
         if len(values) != len(self.proc.outputs):
             raise ExxError(stmt.line, f"expected {len(self.proc.outputs)} return values")
         sources = tuple(self.operand(expr) for expr in values)
-        code = z80.constant_return(self.proc.outputs, sources, self.writable)
+        code = self.cpu.constant_return(self.proc.outputs, sources, self.writable)
         if code is not None:
             self.target_code(code, stmt.line)
-            self.emit(z80.Instruction("ret", reads=parts(self.proc.outputs)), stmt.line)
+            self.emit(self.cpu.ret(parts(self.cpu, self.proc.outputs)), stmt.line)
             return
         # Evaluate tuple sources in their original locations. Keep later
         # operands and every previously established result live during moves.
         protected = set()
         pending = []
         for name, src in zip(self.proc.outputs, sources):
-            code = z80.move(z80.register(name), src)
+            code = self.cpu.move(self.cpu.register(name), src)
             if not code:
-                protected.update(z80.resources(name))
+                protected.update(self.cpu.resources(name))
             else:
                 reads, writes = set(), set()
                 for ins in code:
@@ -231,12 +264,12 @@ class Lowering:
                 live = protected.union(*(p[2] for j, p in enumerate(pending) if j != i))
                 if not writes & live:
                     self.target_code(code, stmt.line)
-                    protected.update(z80.resources(name))
+                    protected.update(self.cpu.resources(name))
                     pending.pop(i)
                     break
             else:
                 raise ExxError(stmt.line, "return values overlap; prepare result registers explicitly")
-        self.emit(z80.Instruction("ret", reads=parts(self.proc.outputs)), stmt.line)
+        self.emit(self.cpu.ret(parts(self.cpu, self.proc.outputs)), stmt.line)
 
     def block(self, statements):
         outer = self.aliases
@@ -244,16 +277,16 @@ class Lowering:
         for stmt in statements:
             try:
                 self.statement(stmt)
-            except z80.TargetError as error:
+            except TargetError as error:
                 raise ExxError(stmt.line, str(error)) from error
         self.aliases = outer
 
     def statement(self, stmt):
         if stmt.kind == "bind":
             for name, reg in stmt.value:
-                if name in self.aliases or z80.resources(name) or not z80.register(reg):
+                if name in self.aliases or self.cpu.resources(name) or not self.cpu.register(reg):
                     raise ExxError(stmt.line, f"invalid binding {name} → {reg}")
-                self.aliases[name] = (reg, None)
+                self.aliases[name] = (reg, self.layouts.get(reg))
         elif stmt.kind == "assign":
             self.assign(stmt)
         elif stmt.kind == "call":
@@ -266,7 +299,7 @@ class Lowering:
             self.condition(stmt.value, alt, False)
             self.block(stmt.body)
             if stmt.otherwise:
-                self.emit(z80.Instruction("jp", (end,)), stmt.line)
+                self.emit(self.cpu.jump(end), stmt.line)
                 self.mark(alt, stmt.line)
                 self.block(stmt.otherwise)
             self.mark(end, stmt.line)
@@ -275,16 +308,18 @@ class Lowering:
             self.mark(start, stmt.line)
             self.condition(stmt.value, end, False)
             self.block(stmt.body)
-            self.emit(z80.Instruction("jp", (start,)), stmt.line)
+            self.emit(self.cpu.jump(start), stmt.line)
             self.mark(end, stmt.line)
+        else:
+            raise ExxError(stmt.line, f"unsupported statement {stmt.kind!r}")
 
     def finish(self):
         self.block(self.proc.body)
-        self.emit(z80.Instruction("end"), self.proc.line)
+        self.emit(Instruction("end"), self.proc.line)
         labels = {s.instruction.operands[0]: i for i, s in enumerate(self.steps)
                   if s.instruction.mnemonic == "label"}
         # Definite assignment at joins is intersection, also on loop back edges.
-        states = {0: parts(p.register for p in self.proc.params)}
+        states = {0: parts(self.cpu, (p.register for p in self.proc.params))}
         queue = deque([0])
         while queue:
             index = queue.popleft()
@@ -302,12 +337,9 @@ class Lowering:
                 if self.proc.outputs:
                     raise ExxError(step.line, f"{self.proc.name} can reach the end without returning its results")
                 continue
-            if ins.mnemonic in ("ret", "tail"):
-                continue
-            successors = [index + 1]
-            if ins.mnemonic == "jp":
-                dest = labels[ins.operands[-1]]
-                successors = [dest] if len(ins.operands) == 1 else [index + 1, dest]
+            successors = [index + 1] if ins.falls_through else []
+            if ins.branch_target is not None:
+                successors.append(labels[ins.branch_target])
             for dest in successors:
                 merged = states[dest] & after if dest in states else after
                 if dest not in states or states[dest] != merged:
@@ -319,14 +351,20 @@ class Lowering:
                 continue
             ins = step.instruction
             if ins.mnemonic == "end":
-                ins = z80.Instruction("ret")
-            elif ins.mnemonic == "tail":
-                ins = z80.Instruction("jp", ins.operands)
+                ins = self.cpu.ret()
             code.append(ins)
-        return Procedure(self.proc.name, z80.compact(code), self.externals)
+        return Procedure(self.proc.name, self.cpu.compact(code), self.externals, self.cpu.name)
 
 
-def compile_source(source: str) -> list[Procedure]:
+def compile_source(source: str, *, platform=None, interfaces=()) -> list[Procedure]:
+    cpu = platforms.create(platform)
+    declared = {}
+    for path, declarations in interfaces:
+        try:
+            collect_signatures(cpu, parse(declarations), declared, interface=True)
+        except ExxError as error:
+            error.source = path
+            raise
     program = parse(source)
-    declared = signatures(program)
-    return [Lowering(proc, declared).finish() for proc in program.procs if proc.body is not None]
+    collect_signatures(cpu, program, declared)
+    return [Lowering(proc, declared, cpu).finish() for proc in program.procs if proc.body is not None]

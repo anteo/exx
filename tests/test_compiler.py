@@ -2,7 +2,7 @@ from textwrap import dedent
 import unittest
 
 from exxlang.compiler import compile_source
-from exxlang.syntax import ExxError
+from exxlang.diagnostics import ExxError
 
 
 def compile_text(source):
@@ -14,6 +14,30 @@ def instructions(procedure):
 
 
 class CompilerTests(unittest.TestCase):
+    def test_unmodelled_registers_cannot_be_used_as_symbolic_immediates(self):
+        for name in ("I", "R", "IXH", "IYL"):
+            with self.subTest(name=name), self.assertRaisesRegex(ExxError, "unsupported Z80 register"):
+                compile_text(f"read() → A {{ return {name} }}")
+
+    def test_parenthesized_load_in_condition_matches_explicit_load(self):
+        for control in ("if", "while"):
+            start = "pick(ctx: CTX → IX) → A clobbers(F) { value → A; "
+            end = " return 1; return 0 }"
+            compact, = compile_text(start + control + " ((value = ctx->action) == ACTION)" + end)
+            explicit, = compile_text(start + "value = ctx->action; " + control + " (value == ACTION)" + end)
+            self.assertEqual(compact.instructions, explicit.instructions)
+        with self.assertRaises(ExxError):
+            compile_text("pick(x → B) → A clobbers(F) { if (A = x) return 1; return 0 }")
+
+    def test_short_circuit_can_skip_assignment(self):
+        for op in ("&&", "||"):
+            with self.subTest(op=op), self.assertRaisesRegex(ExxError, "A unavailable"):
+                compile_text(f"pick(flag → Z) → A clobbers(F) {{ if (flag {op} (A = 1)) {{}}; return A }}")
+
+    def test_comparison_preserves_left_operand(self):
+        with self.assertRaisesRegex(ExxError, "overwrites the left operand"):
+            compile_text("pick(a → A, b → B) clobbers(A, F) { if (a == (a = b)) return }")
+
     def test_assembler_expression_remains_an_immediate(self):
         proc, = compile_text("value() → A { return OFFSET + 1 }")
         self.assertEqual(instructions(proc)[0], ("ld", ("a", "0 + (OFFSET + 1)")))

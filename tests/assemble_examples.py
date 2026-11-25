@@ -48,7 +48,7 @@ def assemble(example: Path, target: str, assembler: str, directory: Path) -> byt
         str(example), "-o", "generated.asm",
     ]
     if constants:
-        if target == "sjasmplus":
+        if target == "asm":
             definitions = [f"{name} equ {value}" for name, value in constants.items()]
         else:
             definitions = [
@@ -61,7 +61,7 @@ def assemble(example: Path, target: str, assembler: str, directory: Path) -> byt
 
     # Fixed-size stubs supply deterministic external addresses to both assemblers.
     stub_code = "".join(f"{name}:\n    ret\n" for name in helpers)
-    if target == "sjasmplus":
+    if target == "asm":
         wrapper = f'    ORG {ORIGIN}\n    INCLUDE "generated.asm"\n{stub_code}'
         (directory / "wrapper.asm").write_text(wrapper, encoding="ascii")
         run([assembler, "--nologo", "--raw=example.bin", "wrapper.asm"], directory)
@@ -77,6 +77,28 @@ def assemble(example: Path, target: str, assembler: str, directory: Path) -> byt
     return (directory / "example.bin").read_bytes()
 
 
+def assemble_shared_abi(directory: Path, sjasmplus: str, z80asm: str) -> None:
+    directory.mkdir()
+    (directory / "shared.abi").write_text("extern fetch(arg → B) → A\n")
+    (directory / "provider.exx").write_text("fetch(value → B) → A { return value }\n")
+    (directory / "caller.exx").write_text("forward(value → B) → A { return fetch(value) }\n")
+    for target in ("asm", "z80asm"):
+        for module in ("caller", "provider"):
+            run([sys.executable, str(ROOT / "exx"), "--platform", "z80", "--target", target,
+                 "--abi", "shared.abi", f"{module}.exx", "-o", f"{module}.asm"], directory)
+        if target == "asm":
+            (directory / "bank.asm").write_text(
+                f'    ORG {ORIGIN}\n    INCLUDE "caller.asm"\n    INCLUDE "provider.asm"\n')
+            run([sjasmplus, "--nologo", "--raw=asm.bin", "bank.asm"], directory)
+        else:
+            run([z80asm, "caller.asm", "provider.asm"], directory)
+            run([z80asm, "-b", f"-r={ORIGIN}", "-o=z80asm.bin", "caller.o", "provider.o"], directory)
+        # Tail jump to $8003, followed by LD A,B and RET.
+        if (directory / f"{target}.bin").read_bytes() != bytes.fromhex("c3 03 80 78 c9"):
+            raise RuntimeError(f"{target}: incorrectly linked shared ABI example")
+    print("shared ABI: separately compiled caller and provider linked to the expected 5 bytes")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sjasmplus", default=os.environ.get("SJASMPLUS", "sjasmplus"))
@@ -90,10 +112,10 @@ def main() -> int:
         with TemporaryDirectory(prefix="exx-assemble-") as scratch:
             for example in examples:
                 binary = assemble(
-                    example, "sjasmplus", args.sjasmplus, Path(scratch) / f"{example.stem}-sj",
+                    example, "asm", args.sjasmplus, Path(scratch) / f"{example.stem}-sj",
                 )
                 linked = assemble(
-                    example, "z88dk", args.z80asm, Path(scratch) / f"{example.stem}-z88dk",
+                    example, "z80asm", args.z80asm, Path(scratch) / f"{example.stem}-z80asm",
                 )
                 if not binary:
                     raise RuntimeError(f"{example.name}: empty binary")
@@ -104,9 +126,10 @@ def main() -> int:
                     )
                     raise RuntimeError(
                         f"{example.name}: binaries differ at offset {mismatch:#x} "
-                        f"(sjasmplus {len(binary)} bytes, z88dk {len(linked)} bytes)"
+                        f"(sjasmplus {len(binary)} bytes, z88dk-z80asm {len(linked)} bytes)"
                     )
                 print(f"{example.name}: both assemblers produced the same {len(binary)} bytes")
+            assemble_shared_abi(Path(scratch) / "shared", args.sjasmplus, args.z80asm)
     except (OSError, RuntimeError) as error:
         print(error, file=sys.stderr)
         return 1

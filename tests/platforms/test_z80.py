@@ -1,6 +1,6 @@
 import unittest
 
-from exxlang import z80
+from exxlang.platforms import z80
 
 
 class Z80Tests(unittest.TestCase):
@@ -70,7 +70,7 @@ class Z80Tests(unittest.TestCase):
 
     def test_condition_uses_existing_flag_or_tests_accumulator(self):
         on_zero = z80.branch(z80.register("Z"), None, None, "target")
-        self.assertEqual(on_zero, (z80.Instruction("jp", ("z", "target"), frozenset(("Z",))),))
+        self.assertEqual(on_zero, (z80.Instruction("jp", ("z", "target"), frozenset(("Z",)), branch_target="target"),))
 
         not_accumulator = z80.branch(z80.register("A"), None, None, "target", when_true=False)
         self.assertEqual(not_accumulator[0], z80.Instruction("or", ("a",), frozenset(("A",)), z80.FLAGS))
@@ -81,14 +81,14 @@ class Z80Tests(unittest.TestCase):
         page = z80.register("E")
         compare = z80.Instruction("cp", ("e",), frozenset(("A", "E")), z80.FLAGS)
         instructions = z80.branch(accumulator, "<", page, "target")
-        self.assertEqual(instructions, (compare, z80.Instruction("jp", ("c", "target"), frozenset(("CF",)))))
+        self.assertEqual(instructions, (compare, z80.Instruction("jp", ("c", "target"), frozenset(("CF",)), branch_target="target")))
         self.assertEqual(instructions, z80.branch(page, ">", accumulator, "target"))
 
         greater = z80.branch(accumulator, ">", page, "target", new_label=lambda: "skip")
         self.assertEqual(greater, (
             compare,
-            z80.Instruction("jp", ("c", "skip"), frozenset(("CF",))),
-            z80.Instruction("jp", ("nz", "target"), frozenset(("Z",))),
+            z80.Instruction("jp", ("c", "skip"), frozenset(("CF",)), branch_target="skip"),
+            z80.Instruction("jp", ("nz", "target"), frozenset(("Z",)), branch_target="target"),
             z80.Instruction("label", ("skip",)),
         ))
         self.assertEqual(greater, z80.branch(page, "<", accumulator, "target", new_label=lambda: "skip"))
@@ -96,8 +96,8 @@ class Z80Tests(unittest.TestCase):
         at_most = z80.branch(accumulator, ">", page, "target", when_true=False)
         self.assertEqual(at_most, (
             compare,
-            z80.Instruction("jp", ("c", "target"), frozenset(("CF",))),
-            z80.Instruction("jp", ("z", "target"), frozenset(("Z",))),
+            z80.Instruction("jp", ("c", "target"), frozenset(("CF",)), branch_target="target"),
+            z80.Instruction("jp", ("z", "target"), frozenset(("Z",)), branch_target="target"),
         ))
 
     def test_comparison_rejects_implicit_accumulator_use(self):

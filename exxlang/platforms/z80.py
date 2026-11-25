@@ -1,27 +1,10 @@
 """Instruction selection and physical register effects for the Z80."""
 
-from dataclasses import dataclass
 import re
 from typing import Callable
 
-
-class TargetError(ValueError):
-    """An operation has no supported Z80 form for its operands."""
-
-
-@dataclass(frozen=True)
-class Operand:
-    kind: str
-    text: str
-    width: int = 0
-
-
-@dataclass(frozen=True)
-class Instruction:
-    mnemonic: str
-    operands: tuple[str, ...] = ()
-    reads: frozenset[str] = frozenset()
-    writes: frozenset[str] = frozenset()
+from ..ir import Instruction, Operand, TargetError
+from ..registry import platforms
 
 
 FLAGS = frozenset(("CF", "Z", "S", "PV", "HF", "N"))
@@ -37,6 +20,10 @@ WORD_PARTS = {
 }
 LOAD_WORDS = frozenset(("BC", "DE", "HL", "IX", "IY", "SP"))
 INDEX_REGISTERS = frozenset(("IX", "IY"))
+UNSUPPORTED_REGISTERS = frozenset({
+    "I", "R", "IXH", "IXL", "IYH", "IYL", "IXU", "IYU", "XH", "XL", "YH", "YL",
+    "HX", "LX", "HY", "LY",
+})
 CONDITION_FLAGS = {"c": "CF", "nc": "CF", "z": "Z", "nz": "Z",
                    "m": "S", "p": "S", "pe": "PV", "po": "PV"}
 FLAG_CONDITIONS = {"CF": ("c", "nc"), "Z": ("z", "nz"),
@@ -246,7 +233,12 @@ def binary(dst: Operand, op: str, src: Operand) -> tuple[Instruction, ...]:
 
 
 def _jump(condition: str, label: str) -> Instruction:
-    return Instruction("jp", (condition, label), resources(CONDITION_FLAGS[condition]))
+    return Instruction("jp", (condition, label), resources(CONDITION_FLAGS[condition]),
+                       branch_target=label)
+
+
+def jump(label: str) -> Instruction:
+    return Instruction("jp", (label,), branch_target=label, falls_through=False)
 
 
 def branch(
@@ -340,3 +332,27 @@ def compact(code: list[Instruction]) -> tuple[Instruction, ...]:
         or not instruction.operands[0].lower().startswith("exx__")
         or instruction.operands[0].lower() in referenced
     )
+
+
+@platforms.register
+class Z80:
+    name = "z80"
+    reserved_abi = {"SP": "SP is reserved for balanced procedure calls"}
+    unsupported_registers = UNSUPPORTED_REGISTERS
+    layout_registers = tuple(sorted(INDEX_REGISTERS))
+    register = staticmethod(register)
+    resources = staticmethod(resources)
+    field_operand = staticmethod(field_operand)
+    operand_reads = staticmethod(_reads)
+    move = staticmethod(move)
+    binary = staticmethod(binary)
+    branch = staticmethod(branch)
+    jump = staticmethod(jump)
+    constant_return = staticmethod(constant_return)
+    compact = staticmethod(compact)
+
+    def call(self, name, inputs, outputs, tail):
+        return Instruction("jp" if tail else "call", (name,), inputs, outputs, falls_through=not tail)
+
+    def ret(self, outputs=frozenset()):
+        return Instruction("ret", reads=outputs, falls_through=False)

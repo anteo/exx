@@ -11,13 +11,11 @@ extern video_unavailable() → (CF, A) clobbers(F)
 // CF set: A is the error. CF clear: A selects keep (0) or install (1).
 video_plan_plane(window → B, page → E, session: VID_SESSION → IX, context: VID_CTX → IY)
     → (CF, A) clobbers(C, D, HL, F) {
-    A = window
-    if (A == RST8_VID_NO_WINDOW) return (0, 0)
+    if ((A = window) == RST8_VID_NO_WINDOW) return (0, 0)
     (CF, Z, A) = video_window_matches(window, page, session, context)
     if (CF) return (CF, A)
     if (Z) {
-        A = session->action
-        if (A != RST8_VID_PREP_DRAW) return (0, 0)
+        if ((A = session->action) != RST8_VID_PREP_DRAW) return (0, 0)
         A = context->config
         if (A) return (0, 0)
         A = session->dest
@@ -28,16 +26,14 @@ video_plan_plane(window → B, page → E, session: VID_SESSION → IX, context:
     }
     A = context->config
     if (A) {
-        A = session->action
-        if (A == RST8_VID_SELECT_DRAW || A == RST8_VID_SHOW_SLOT)
+        if ((A = session->action) == RST8_VID_SELECT_DRAW || A == RST8_VID_SHOW_SLOT)
             return video_unavailable()
     }
     (CF, A) = video_stack_safe(window, session)
     if (CF) return (CF, A)
     A = context->config
     if (!A) {
-        A = session->action
-        if (A == RST8_VID_PREP_DRAW) {
+        if ((A = session->action) == RST8_VID_PREP_DRAW) {
             A = VID_CTX.draw
             Z = video_plane_conflict(A, window, page, session, context)
             if (!Z) return (0, 0)
