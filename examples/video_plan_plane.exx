@@ -1,0 +1,47 @@
+// The caller supplies a resident VID_CTX and an open mapper in VID_SESSION.
+// Each helper is reachable in the current ROM bank. Its register ABI is
+// supplied here because the implementations are ordinary DuoConf assembly.
+extern video_window_matches(window → B, page → E, session: VID_SESSION → IX, context: VID_CTX → IY)
+    → (CF, Z, A) clobbers(C, D, HL, F)
+extern video_stack_safe(window → B, session: VID_SESSION → IX) → (CF, A) clobbers(C, HL, F)
+extern video_plane_conflict(slot → A, window → B, page → E, session: VID_SESSION → IX, context: VID_CTX → IY)
+    → Z clobbers(A, HL, F)
+extern video_unavailable() → (CF, A) clobbers(F)
+
+// CF set: A is the error. CF clear: A selects keep (0) or install (1).
+video_plan_plane(window → B, page → E, session: VID_SESSION → IX, context: VID_CTX → IY)
+    → (CF, A) clobbers(C, D, HL, F) {
+    A = window
+    if (A == RST8_VID_NO_WINDOW) return (0, 0)
+    (CF, Z, A) = video_window_matches(window, page, session, context)
+    if (CF) return (CF, A)
+    if (Z) {
+        A = session->action
+        if (A != RST8_VID_PREP_DRAW) return (0, 0)
+        A = context->config
+        if (A) return (0, 0)
+        A = session->dest
+        A ^= VID_CTX.slot0 ^ VID_CTX.slot1
+        Z = video_plane_conflict(A, window, page, session, context)
+        if (Z) return (0, 0)
+        return video_stack_safe(window, session)
+    }
+    A = context->config
+    if (A) {
+        A = session->action
+        if (A == RST8_VID_SELECT_DRAW || A == RST8_VID_SHOW_SLOT)
+            return video_unavailable()
+    }
+    (CF, A) = video_stack_safe(window, session)
+    if (CF) return (CF, A)
+    A = context->config
+    if (!A) {
+        A = session->action
+        if (A == RST8_VID_PREP_DRAW) {
+            A = VID_CTX.draw
+            Z = video_plane_conflict(A, window, page, session, context)
+            if (!Z) return (0, 0)
+        }
+    }
+    return (0, 1)
+}
