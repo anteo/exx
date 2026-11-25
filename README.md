@@ -1,5 +1,7 @@
 # EXX
 
+[![English](https://img.shields.io/badge/lang-en-blue.svg)](README.md) [![Русский](https://img.shields.io/badge/lang-ru-green.svg)](README.ru.md)
+
 EXX translates high-level assembly procedures into symbolic Z80 assembly. Each
 procedure declares its register ABI. You can replace a routine in a ROM bank
 or compile an object for a z88dk library while keeping its existing callers.
@@ -24,23 +26,42 @@ The arguments already occupy B and IX. The call and the error check compile to
 ## Compile a module
 
 ```sh
-./exx --target sjasmplus examples/sdk_console_cursor.exx -o cursor.asm
-./exx --target z88dk --section code_clib examples/sdk_console_cursor.exx -o cursor_z88dk.asm
-z88dk-z80asm cursor_z88dk.asm
+./exx --target asm examples/sdk_console_cursor.exx -o cursor.asm
+./exx --target z80asm --section code_clib examples/sdk_console_cursor.exx -o cursor_z80asm.asm
+z88dk-z80asm cursor_z80asm.asm
 ```
 
-Use `INCLUDE "cursor.asm"` in the desired sjasmplus bank. The z88dk output
+The `asm` target emits an assembly fragment with labels, instructions and any
+requested includes. Its host supplies symbol definitions, including dotted
+layout offsets, and chooses where to place the code. In a sjasmplus bank use
+`INCLUDE "cursor.asm"`. The `z80asm` target emits a module for `z88dk-z80asm`. It
 exports the procedure names with `PUBLIC` and imports the referenced external
 procedures with `EXTERN`. Link the resulting object alongside ordinary ASM
 objects. A C caller needs a compatible register convention or an ASM adapter.
-Omit `-o` to print the generated assembly. The `--target` values select the
-assembler dialect for the same Z80 instruction selection.
+Omit `-o` to print the generated assembly. Both targets render the same
+selected Z80 instructions. Use `--platform z80` to select the CPU explicitly.
+With just `--target`, the target selects its first supported platform.
+
+For separately compiled procedures, put their shared `extern` declarations
+in a file and pass it to each compilation. EXX checks the implementation
+against the declared input locations and layouts, ordered outputs and clobbers.
+The caller obtains its declarations from the same file. For example:
+
+```sh
+./exx --target z80asm --abi video.abi video.exx -o video.asm
+./exx --target z80asm --abi video.abi caller.exx -o caller.asm
+```
+
+You can repeat `--abi` to import several interfaces. Assembly routines
+described by an interface must implement the declared contract.
 
 To regenerate assembly as part of an existing Make build:
 
 ```make
 include path/to/exx/exx.mk
-EXX_TARGET := sjasmplus
+EXX_TARGET := asm
+# For modules sharing external contracts:
+# EXX_ABI := video.abi
 
 build/%.asm: src/%.exx $(EXX_TOOL_DEPS)
 	$(exx_compile)
@@ -68,10 +89,15 @@ build/%.asm: src/%.exx $(EXX_TOOL_DEPS)
   test the accumulator via `or a`, which writes F. Declare the changed
   resources as outputs or clobbers. Comparisons are unsigned. A comparison of
   two bytes needs A as one of its operands. `&&` and `||` short-circuit.
+- A parenthesized assignment can supply a condition operand in `if` or
+  `while`. For example, `if ((A = session->action) == RST8_VID_PREP_DRAW)`
+  loads A once and then compares it. In `if (Z && (A = session->action) == 1)`,
+  the load runs only when Z was set. A keeps its resulting value on each path.
+  An alias bound to A can appear in its place.
 
 ## Expressions and layouts
 
-The first version supports `if`/`else`, `while`, calls, returns, byte loads,
+EXX supports `if`/`else`, `while`, calls, returns, byte loads,
 register-pair immediates, accumulator arithmetic and XOR, and selected pair
 operations. Expressions use explicit destinations. For `A = B + C`, write
 `A = B` followed by `A += C`. Unsupported instruction forms produce a
@@ -79,18 +105,36 @@ source-line diagnostic. You can separate statements with newlines or semicolons.
 
 In `context: VID_CTX → IY`, the type supplies the prefix for byte-field
 offsets. `A = context->config` generates `ld a,(iy + VID_CTX.config)` for
-sjasmplus. z88dk output uses `VID_CTX_config`. Supply the matching layout and
+sjasmplus. The `z80asm` target uses `VID_CTX_config`. Supply the matching layout and
 constants in the host assembly or with `--include layout.inc`. Uppercase
 constant names and names such as `VID_CTX.slot0` are assembler symbols.
 Numeric field offsets and bank addresses are the host assembler's responsibility.
+Passing IY directly or through a local alias uses the layout declared for IY
+in the calling procedure. This checks the nominal interface. The caller is
+responsible for the address held in the register.
 
-The compiler tracks availability of physical locations. Conditional meanings
-of results, such as “A holds an error only when CF is set”, belong to the
-external ABI documentation in this version. The compiler trusts external ASM
-declarations. Stack frames, register allocation and automatic saves are outside
-the first version.
+The compiler checks which registers and flags are available on each path.
+Document any conditions on their meaning in the procedure's ABI, such as
+“A holds an error code when CF is set.” For external ASM procedures, EXX
+relies on the declared contract. The programmer chooses the registers and
+handles any stack frames and register saves.
 
 ## Examples and verification
+
+The frontend lives in `exxlang/tokenizer.py` and `exxlang/parser.py`.
+The parser builds the nodes in `exxlang/syntax.py`. Processor-specific
+instruction selection lives in `exxlang/platforms/z80.py`. Each platform
+registers its class with `@platforms.register` and owns the register model,
+instruction selection and instruction effects. Conditional transfers describe
+their destination and fallthrough explicitly for the shared flow analysis.
+Each assembler target in `exxlang/targets/` registers with `@targets.register`
+and declares its supported platform names. A target can inherit the common
+assembly printer and override its header and operand spelling.
+The registries discover modules in their respective packages. The CLI builds
+its choices from registered names and checks the selected combination.
+The tokenizer,
+parser and register contracts have separate unit tests. CPU-specific tests
+live under `tests/platforms/`.
 
 - [video_plan_plane.exx](examples/video_plan_plane.exx) implements the DuoConf
   plane planner with indexed fields, external procedures, and flag returns.
@@ -103,6 +147,11 @@ the first version.
 python3 -m unittest discover -s tests
 python3 tests/assemble_examples.py
 ```
+
+The unit suite compiles each `examples/*.exx` through the CLI and compares the
+full output with `tests/golden/asm/<name>.asm` and `tests/golden/z80asm/<name>.asm`.
+A mismatch shows a line-by-line diff. When changing the generated assembly
+intentionally, review and update the affected reference files.
 
 The assembly check requires sjasmplus and z88dk-z80asm on PATH. It assembles
 and compares both outputs for every example. The DuoConf fixture supplies
