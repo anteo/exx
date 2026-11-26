@@ -130,6 +130,39 @@ status:
     ret
 ```
 
+### Returning values already in registers
+
+`return` by itself returns the current values in the registers and flags named
+in the procedure signature. EXX checks that every declared result is available
+on every path to that statement. Here both results come from the caller.
+
+```text
+(CF, BC) relay(carry → CF, cursor → BC) { return }
+```
+
+```asm
+relay:
+    ret
+```
+
+### Returning at the end of a procedure
+
+Reaching the closing `}` returns the current values in the declared result
+registers and flags. EXX checks that those values are available on every path
+that reaches the closing brace. Use `return` to leave the procedure early.
+
+```text
+A read_byte(byte → E) {
+    A = byte
+}
+```
+
+```asm
+read_byte:
+    ld a, e
+    ret
+```
+
 ### Capturing call results
 
 List all result locations in declaration order. A standalone call discards the results. Document

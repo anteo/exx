@@ -167,7 +167,9 @@ class _Parser:
         else:
             self._skip_newlines()
             body = self._block()
-        return Proc(name, tuple(params), outputs, clobbers, body, line, start, self.tokens[self.index - 1].offset)
+        end = self.tokens[self.index - 1]
+        return Proc(name, tuple(params), outputs, clobbers, body, line,
+                    end_line=end.line, start=start, end=end.offset)
 
     def _parameter(self) -> Param:
         name = self._expect_name()

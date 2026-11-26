@@ -52,6 +52,7 @@ class Proc:
     clobbers: tuple[str, ...]
     body: tuple[Stmt, ...] | None
     line: int
+    end_line: int
     start: int = 0
     end: int = 0
 

@@ -266,6 +266,34 @@ class CompilerTests(unittest.TestCase):
         with self.assertRaisesRegex(ExxError, "expected 2 return values"):
             compile_text("(A, CF) example(input → A) { return input }")
 
+    def test_bare_return_uses_result_registers_on_both_paths(self):
+        source = """
+            (CF, BC) wrap(cursor → BC, limit → E) clobbers(A, F) {
+                column → C
+                if ((A = ++column) < limit) return
+                column = 0
+                return
+            }
+        """
+        bare, = compile_text(source)
+        explicit, = compile_text(source.replace("return", "return (CF, cursor)"))
+        body, close = source.rsplit("return", 1)
+        implicit, = compile_text(body + close)
+        self.assertEqual(instructions(bare), instructions(explicit))
+        self.assertEqual(instructions(implicit), instructions(explicit))
+        self.assertIn(("ret", ("c",)), instructions(bare))
+
+    def test_bare_return_rejects_results_missing_on_a_path(self):
+        for source, missing in (
+            ("A f(ready → Z) { if (ready) A = 1; return }", "A"),
+            ("BC f(high → B, ready → Z) { if (ready) C = 1; return }", "C"),
+            ("extern work() clobbers(CF)\n"
+             "CF f(ready → Z, carry → CF) { if (ready) work(); return }", "CF"),
+        ):
+            for variant in (source, source.replace("; return }", " }")):
+                with self.subTest(source=variant), self.assertRaisesRegex(ExxError, f"{missing} unavailable"):
+                    compile_text(variant)
+
     def test_tail_call_checks_output_locations_and_emits_jump(self):
         procedure, = compile_text("""
             extern (A, HL, DE) read(source → E)
@@ -322,12 +350,13 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(code[2:4], [("pop", ("bc",)), ("jp", ("next",))])
 
     def test_all_reachable_paths_produce_results(self):
-        with self.assertRaisesRegex(ExxError, "can reach the end without returning"):
+        with self.assertRaisesRegex(ExxError, "A unavailable") as error:
             compile_text("""
                 A example(carry → CF) {
                     if (carry) return 1
                 }
             """)
+        self.assertEqual(error.exception.line, 3)
 
         procedure, = compile_text("""
             A example(carry → CF) {

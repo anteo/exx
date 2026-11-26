@@ -471,10 +471,11 @@ class Lowering:
         self.target_code(code, stmt.line)
 
     def returns(self, stmt):
-        if stmt.value and stmt.value.kind == "call":
-            self.call(stmt.value, tail=True)
-            return
-        self.prepare_results(stmt)
+        if stmt.value is not None:
+            if stmt.value.kind == "call":
+                self.call(stmt.value, tail=True)
+                return
+            self.prepare_results(stmt)
         outputs = parts(self.cpu, self.proc.outputs)
         self.restore_kept(0, stmt.line, outputs)
         self.emit(self.cpu.ret(outputs), stmt.line)
@@ -621,7 +622,7 @@ class Lowering:
         self.collect_labels(self.proc.body)
         self.block(self.proc.body)
         self.position = self.proc.end
-        self.emit(Instruction("end"), self.proc.line)
+        self.returns(Stmt("return", self.proc.end_line))
         labels = {s.instruction.operands[0]: i for i, s in enumerate(self.steps)
                   if s.instruction.mnemonic == "label"}
         # Definite assignment at joins is intersection, also on loop back edges.
@@ -634,12 +635,8 @@ class Lowering:
             index = queue.popleft()
             step = self.steps[index]
             ins = step.instruction
-            exit_path = ins.mnemonic == "end" or (not ins.falls_through and ins.branch_target is None)
+            exit_path = not ins.falls_through and ins.branch_target is None
             after = states[index].advance(step, layout, protected, exit_path)
-            if ins.mnemonic == "end":
-                if self.proc.outputs:
-                    raise ExxError(step.line, f"{self.proc.name} can reach the end without returning its results")
-                continue
             successors = [index + 1] if ins.falls_through else []
             if ins.branch_target is not None:
                 successors.append(labels[ins.branch_target])
@@ -653,10 +650,7 @@ class Lowering:
             # Even unreachable raw assembly may define symbols or assembler directives.
             if index not in states and step.instruction.mnemonic != "asm":
                 continue
-            ins = step.instruction
-            if ins.mnemonic == "end":
-                ins = replace(self.cpu.ret(), source_offset=self.proc.end)
-            code.append(ins)
+            code.append(step.instruction)
         return Procedure(self.proc.name, self.cpu.compact(code), self.externals, self.cpu.name,
                          self.proc.start, self.proc.end)
 

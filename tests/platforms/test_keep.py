@@ -32,7 +32,7 @@ class KeepTests(unittest.TestCase):
         assembly("B f(x → B) { keep(BC) { C = 3; return x } }")
         assembly("A f() { A = 7; keep(AF) { keep(AF) { A = 3 }; return A } }")
         assembly("B f() { keep(AF) { A = 3; return A } }")
-        for body in ("A = 3; return A", "if (flag) { A = 3 }; return A"):
+        for body in ("A = 3; return A", "if (flag) { A = 3 }; return A", "A = 3; return"):
             with self.subTest(body=body), self.assertRaisesRegex(ExxError, "keep.*live A"):
                 assembly("A f(x → A, flag → CF) { keep(AF) { " + body + " } }")
         with self.assertRaisesRegex(ExxError, "keep.*live CF"):

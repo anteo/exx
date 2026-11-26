@@ -3,19 +3,15 @@
 (CF, BC) zx__console_newline(cursor → BC, rows → D) clobbers(A, F) {
     (column, row) → (C, B)
     column = 0
-    row += 1
-    A = row
-    if (A < rows) return (CF, cursor)
+    if ((A = ++row) < rows) return
 
-    row = rows
-    row -= 1
-    return (CF, cursor)
+    row = rows - 1
 }
 
 // Advance one cell and wrap at the right edge.
 // Both dimensions must be nonzero. Carry is set when no scroll is needed.
 (CF, BC) zx__console_advance(cursor → BC, geometry → DE) clobbers(A, F) {
     (column, columns, rows) → (C, E, D)
-    if ((A = ++column) < columns) return (CF, cursor)
+    if ((A = ++column) < columns) return
     return zx__console_newline(cursor, rows)
 }
