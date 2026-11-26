@@ -222,15 +222,15 @@ reference files when changing the output intentionally. Tokenizer, parser and re
 have dedicated tests. CPU-specific tests live in `tests/platforms/`.
 
 ```sh
-python3 -m unittest discover -s tests
+make test
 ```
 
 ### Binary comparison
 
 The assembly check compares both binaries for every example. The DuoConf fixture supplies
 matching layout constants and four external helper stubs at the same addresses. Put sjasmplus
-and z88dk-z80asm on PATH or select them with `--sjasmplus PATH` and `--z80asm PATH`.
+and z88dk-z80asm on PATH or set `SJASMPLUS` and `Z88DK_Z80ASM` to their paths.
 
 ```sh
-python3 tests/assemble_examples.py
+make test-asm
 ```

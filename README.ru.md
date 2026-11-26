@@ -222,16 +222,16 @@ class PlainAsm(Assembler):
 контрактов есть отдельные тесты. Проверки конкретного процессора находятся в `tests/platforms/`.
 
 ```sh
-python3 -m unittest discover -s tests
+make test
 ```
 
 ### Сравнение машинного кода
 
 Скрипт собирает каждый пример обоими ассемблерами и сравнивает байты. Для примера DuoConf он
 задаёт одинаковую раскладку и размещает четыре заглушки внешних процедур по одинаковым адресам.
-Ассемблеры sjasmplus и z88dk-z80asm берутся из PATH, пути можно указать через `--sjasmplus PATH`
-и `--z80asm PATH`.
+Ассемблеры sjasmplus и z88dk-z80asm берутся из PATH. Пути можно задать
+переменными `SJASMPLUS` и `Z88DK_Z80ASM`.
 
 ```sh
-python3 tests/assemble_examples.py
+make test-asm
 ```
