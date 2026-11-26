@@ -19,144 +19,515 @@ check_window(window → B, session: VID_SESSION → IX)
 }
 ```
 
+```asm
+check_window:
+    call video_stack_safe
+    ret c
+    xor a
+    inc a
+    ret
+```
+
 The arguments already occupy B and IX. The call and the error check compile to
 `call video_stack_safe` and `ret c`. The success return uses `xor a`,
 `inc a`, `ret`, yielding A=1 and a clear carry.
 
-## Compile a module
+## Reading the examples
+
+Each EXX example is followed by output from the `asm` target unless another target is named.
+For procedure-body fragments, the listing shows the corresponding instructions and branch
+labels. The enclosing procedure’s entry label and implicit final `ret` are omitted.
+In these fragments `session` is a `VID_SESSION` pointer in IX and `packet` is a `PACKET` pointer in IY.
+
+## Build a module
+
+### Assembly fragment
+
+The `asm` target emits symbolic Z80 instructions. Include the file in the desired ROM bank with
+`INCLUDE "cursor.asm"`. The host assembler determines its address.
 
 ```sh
 ./exx --target asm examples/sdk_console_cursor.exx -o cursor.asm
-./exx --target z80asm --section code_clib examples/sdk_console_cursor.exx -o cursor_z80asm.asm
-z88dk-z80asm cursor_z80asm.asm
 ```
 
-The `asm` target emits an assembly fragment with labels, instructions and any
-requested includes. Its host supplies symbol definitions, including dotted
-layout offsets, and chooses where to place the code. In a sjasmplus bank use
-`INCLUDE "cursor.asm"`. The `z80asm` target emits a module for `z88dk-z80asm`. It
-exports the procedure names with `PUBLIC` and imports the referenced external
-procedures with `EXTERN`. Link the resulting object alongside ordinary ASM
-objects. A C caller needs a compatible register convention or an ASM adapter.
-Omit `-o` to print the generated assembly. Both targets render the same
-selected Z80 instructions. Use `--platform z80` to select the CPU explicitly.
-With just `--target`, the target selects its first supported platform.
+The two cursor routines can now be included together. [Generated cursor.asm](tests/golden/asm/sdk_console_cursor.asm)
 
-For separately compiled procedures, put their shared `extern` declarations
-in a file and pass it to each compilation. EXX checks the implementation
-against the declared input locations and layouts, ordered outputs and clobbers.
-The caller obtains its declarations from the same file. For example:
+### Linkable assembly module
+
+The `z80asm` target emits the same instructions with `SECTION`, `PUBLIC` and `EXTERN` for
+`z88dk-z80asm`. Link the object with other ASM modules. A C caller needs a compatible calling
+convention or an ASM adapter.
+
+```sh
+./exx --target z80asm --section code_clib examples/sdk_console_cursor.exx -o cursor.asm
+z88dk-z80asm cursor.asm
+```
+
+The generated module begins with these directives.
+
+```asm
+    SECTION code_clib
+    PUBLIC zx__console_newline
+    PUBLIC zx__console_advance
+```
+
+### CPU selection
+
+Use `--platform` to select the CPU. By default EXX uses the first platform supported by the
+target. Omitting `-o` prints the assembly to stdout.
+
+```sh
+./exx --platform z80 --target asm examples/advance_block.exx
+```
+
+The output contains both the routine and its caller. [Generated advance_block.asm](tests/golden/asm/advance_block.asm)
+
+### Assembler includes
+
+Use `--include` to place layout and constant definitions before the generated procedures.
+
+```sh
+./exx --target asm --include layout.inc examples/buffer.exx -o buffer.asm
+```
+
+```asm
+    INCLUDE "layout.inc"
+```
+
+### Shared interfaces
+
+Pass the same declarations to the caller and the implementation. EXX checks input registers and
+layouts, result order and clobbers. Repeat `--abi` to load several interfaces. External ASM
+implementations must honour their declarations.
 
 ```sh
 ./exx --target z80asm --abi video.abi video.exx -o video.asm
 ./exx --target z80asm --abi video.abi caller.exx -o caller.asm
 ```
 
-You can repeat `--abi` to import several interfaces. Assembly routines
-described by an interface must implement the declared contract.
+For example, put `extern read_page(page → E) → A` in `video.abi`. With
+`read_page(page → E) → A { return page }` in `video.exx` and
+`fetch_page(page → E) → A { return read_page(page) }` in `caller.exx`, the two modules use the same symbol.
 
-To regenerate assembly as part of an existing Make build:
+```asm
+; video.asm
+    SECTION code_user
+    PUBLIC read_page
+
+read_page:
+    ld a, e
+    ret
+```
+
+```asm
+; caller.asm
+    SECTION code_user
+    PUBLIC fetch_page
+    EXTERN read_page
+
+fetch_page:
+    jp read_page
+```
+
+### Make integration
+
+Include `exx.mk` to rebuild the assembly when the source, compiler or a shared file listed in
+`EXX_ABI` changes.
 
 ```make
 include path/to/exx/exx.mk
 EXX_TARGET := asm
-# For modules sharing external contracts:
-# EXX_ABI := video.abi
+EXX_ABI := video.abi
 
 build/%.asm: src/%.exx $(EXX_TOOL_DEPS)
 	$(exx_compile)
 ```
 
-## Register contracts
+## Procedures and registers
 
-- Bind parameters with `window → B` or declare local names with
-  `(window, page) → (B, E)`. A binding names the current contents of the
-  physical register. Assignments perform the actual moves.
-- Calls check argument count and location. If the next procedure takes its
-  argument in E and the value is in D, write `E = D` before the call.
-- Results may occupy multiple independent locations, e.g. `→ (A, HL, DE)`.
-  Capture them in signature order or call the procedure as a statement.
-  `return (status, cursor, remaining)` places the values in their declared
-  locations. A register permutation that needs temporary storage requires
-  explicit moves. `return helper(args)` tail-jumps to a routine with a matching
-  result ABI. External routines must be reachable in the active memory map.
-- `clobbers(C, HL, F)` allows the callee to overwrite those resources.
-  After the call, a declared output takes precedence over a clobber of the
-  same location. Reads require initialization on every incoming path, including
-  loop back edges. BC, DE, HL and AF overlap their components. F covers the
-  six documented status flags. SP is reserved for the call stack.
-- `if (CF)` and `if (Z)` read the current flags. `if (A)` and `if (!A)`
-  test the accumulator via `or a`, which writes F. Declare the changed
-  resources as outputs or clobbers. Comparisons are unsigned. A comparison of
-  two bytes needs A as one of its operands. `&&` and `||` short-circuit.
-- A parenthesized assignment can supply a condition operand in `if` or
-  `while`. For example, `if ((A = session->action) == RST8_VID_PREP_DRAW)`
-  loads A once and then compares it. In `if (Z && (A = session->action) == 1)`,
-  the load runs only when Z was set. A keeps its resulting value on each path.
-  An alias bound to A can appear in its place.
+### Register parameters
 
-## Expressions and layouts
+An arrow binds a parameter name to the register that holds it on entry. Here `page` already occupies E.
 
-EXX supports `if`/`else`, `while`, calls, returns, byte loads,
-register-pair immediates, accumulator arithmetic and XOR, and selected pair
-operations. Expressions use explicit destinations. For `A = B + C`, write
-`A = B` followed by `A += C`. Unsupported instruction forms produce a
-source-line diagnostic. You can separate statements with newlines or semicolons.
-
-In `context: VID_CTX → IY`, the type supplies the prefix for byte-field
-offsets. `A = context->config` generates `ld a,(iy + VID_CTX.config)` for
-sjasmplus. The `z80asm` target uses `VID_CTX_config`. Supply the matching layout and
-constants in the host assembly or with `--include layout.inc`. Uppercase
-constant names and names such as `VID_CTX.slot0` are assembler symbols.
-Numeric field offsets and bank addresses are the host assembler's responsibility.
-Passing IY directly or through a local alias uses the layout declared for IY
-in the calling procedure. This checks the nominal interface. The caller is
-responsible for the address held in the register.
-
-The compiler checks which registers and flags are available on each path.
-Document any conditions on their meaning in the procedure's ABI, such as
-“A holds an error code when CF is set.” For external ASM procedures, EXX
-relies on the declared contract. The programmer chooses the registers and
-handles any stack frames and register saves.
-
-## Examples and verification
-
-The frontend lives in `exxlang/tokenizer.py` and `exxlang/parser.py`.
-The parser builds the nodes in `exxlang/syntax.py`. Processor-specific
-instruction selection lives in `exxlang/platforms/z80.py`. Each platform
-registers its class with `@platforms.register` and owns the register model,
-instruction selection and instruction effects. Conditional transfers describe
-their destination and fallthrough explicitly for the shared flow analysis.
-Each assembler target in `exxlang/targets/` registers with `@targets.register`
-and declares its supported platform names. A target can inherit the common
-assembly printer and override its header and operand spelling.
-The registries discover modules in their respective packages. The CLI builds
-its choices from registered names and checks the selected combination.
-The tokenizer,
-parser and register contracts have separate unit tests. CPU-specific tests
-live under `tests/platforms/`.
-
-- [video_plan_plane.exx](examples/video_plan_plane.exx) implements the DuoConf
-  plane planner with indexed fields, external procedures, and flag returns.
-- [sdk_console_cursor.exx](examples/sdk_console_cursor.exx) implements the two
-  zxevo-sdk cursor routines with their BC/DE ABI.
-- [advance_block.exx](examples/advance_block.exx) shows a loop and a three-value
-  result in A, HL and DE.
-
-```sh
-python3 -m unittest discover -s tests
-python3 tests/assemble_examples.py
+```text
+read_page(page → E) → A { return page }
 ```
 
-The unit suite compiles each `examples/*.exx` through the CLI and compares the
-full output with `tests/golden/asm/<name>.asm` and `tests/golden/z80asm/<name>.asm`.
-A mismatch shows a line-by-line diff. When changing the generated assembly
-intentionally, review and update the affected reference files.
+```asm
+read_page:
+    ld a, e
+    ret
+```
 
-The assembly check requires sjasmplus and z88dk-z80asm on PATH. It assembles
-and compares both outputs for every example. The DuoConf fixture supplies
-layout constants and four external helper stubs at matching addresses. Use
-`--sjasmplus PATH` or `--z80asm PATH` to select another installation.
+### Local register aliases
+
+A local binding gives one register or a tuple of registers a name. Reading an alias reads the
+register’s current value.
+
+```text
+(cursor, remaining) → (HL, DE)
+cursor += 1
+```
+
+```asm
+    inc hl
+```
+
+### Checked calls
+
+EXX checks the number and location of arguments. This caller explicitly moves D into the
+required register E.
+
+```text
+extern select_page(page → E)
+select_from_d(page → D) clobbers(E) {
+    E = page
+    select_page(E)
+}
+```
+
+```asm
+select_from_d:
+    ld e, d
+    call select_page
+    ret
+```
+
+### Multiple return values
+
+Return values in signature order. Here CF keeps its current value and A receives 5. A
+permutation that needs a temporary register requires explicit moves.
+
+```text
+status(carry → CF) → (CF, A) { return (carry, 5) }
+```
+
+```asm
+status:
+    ld a, 5
+    ret
+```
+
+### Capturing call results
+
+List all result locations in declaration order. A standalone call discards the results. Document
+conditional meanings such as an error code in A when CF is set.
+
+```text
+extern query() → (A, HL, DE)
+inspect() → HL clobbers(A, DE) {
+    (A, HL, DE) = query()
+    return HL
+}
+```
+
+```asm
+inspect:
+    call query
+    ret
+```
+
+### Tail calls
+
+Returning a call with a matching result ABI generates a jump. The destination must be reachable
+in the active memory map.
+
+```text
+extern read_byte() → A
+fetch() → A { return read_byte() }
+```
+
+```asm
+fetch:
+    jp read_byte
+```
+
+### Clobber declarations
+
+`clobbers` permits changes visible to the caller. A result remains available even if its
+register also appears in `clobbers`. F covers the six documented flags. AF, BC, DE and HL
+overlap their components.
+
+```text
+extern probe() → (CF, A) clobbers(HL, F)
+```
+
+An `extern` declaration emits no instructions. Calling `probe` from a `z80asm` module adds `EXTERN probe` to its header.
+
+### Definite assignment
+
+A read requires a value on every incoming path, including loop back edges. After `work()` the
+caller must initialize D before returning DE.
+
+```text
+extern work() clobbers(D)
+reset_high(word → DE) → DE {
+    work()
+    D = 0
+    return word
+}
+```
+
+```asm
+reset_high:
+    call work
+    ld d, 0
+    ret
+```
+
+## Conditions and loops
+
+### Flag tests
+
+`if (CF)` and `if (Z)` read the current flag. Immediately after a call this tests the flag
+supplied by the callee.
+
+```text
+(CF, A) = probe()
+if (CF) return (CF, A)
+return (0, 1)
+```
+
+```asm
+    call probe
+    ret c
+    xor a
+    inc a
+    ret
+```
+
+### Accumulator tests
+
+`if (A)` tests for a nonzero byte and `if (!A)` tests for zero. Both emit `or a`, which updates F.
+
+```text
+if (!A) return A
+return 1
+```
+
+```asm
+    or a
+    ret z
+    ld a, 1
+    ret
+```
+
+### Unsigned comparisons
+
+Compare bytes with A as one operand. `else` selects the other branch. The comparison updates flags.
+
+```text
+if (A < C) return A
+else return C
+```
+
+```asm
+    cp c
+    ret c
+    ld a, c
+    ret
+```
+
+### Assignment in a condition
+
+Parenthesize the assignment to load a register exactly where its value is tested. The
+destination may be a register alias.
+
+```text
+if ((A = session->action) == RST8_VID_PREP_DRAW) return 1
+return 0
+```
+
+```asm
+    ld a, (ix + VID_SESSION.action)
+    cp RST8_VID_PREP_DRAW
+    jp nz, exx__example_1
+    ld a, 1
+    ret
+exx__example_1:
+    ld a, 0
+    ret
+```
+
+### Short-circuit conditions
+
+`&&` and `||` evaluate the right operand only when needed. Here A receives the field value only
+on the path where Z is set.
+
+```text
+if (Z && (A = session->action) == 1) return A
+return 0
+```
+
+```asm
+    jp nz, exx__example_1
+    ld a, (ix + VID_SESSION.action)
+    cp 1
+    ret z
+exx__example_1:
+    ld a, 0
+    ret
+```
+
+### Pre-test loops
+
+`while` tests before each iteration. A zero in A skips this loop entirely.
+
+```text
+while (A) {
+    HL += 1
+    A -= 1
+}
+```
+
+```asm
+exx__example_1:
+    or a
+    jp z, exx__example_2
+    inc hl
+    sub 1
+    jp exx__example_1
+exx__example_2:
+```
+
+### Counted loops
+
+`repeat` runs the body, then decrements B using `djnz`, preserving flags for the loop test. An
+initial zero gives 256 iterations if the body leaves B alone. For a potentially out-of-range
+back edge EXX uses a nearby `djnz` and absolute jumps.
+
+```text
+count → B
+count = 16
+repeat (count) {
+    *HL = A
+    HL += 1
+}
+```
+
+```asm
+    ld b, 16
+exx__example_1:
+    ld (hl), a
+    inc hl
+    djnz exx__example_1
+```
+
+### Early loop exit
+
+`break` exits the innermost `while` or `repeat`. Here a zero byte exits before either HL or B changes.
+
+```text
+repeat (B) {
+    if (!(A = *HL)) break
+    HL += 1
+}
+```
+
+```asm
+exx__example_1:
+    ld a, (hl)
+    or a
+    jp z, exx__example_2
+    inc hl
+    djnz exx__example_1
+exx__example_2:
+```
+
+## Memory and symbols
+
+### Byte pointers
+
+`*ptr` accesses the byte addressed by BC, DE, HL, IX or IY. Transfers through BC and DE require
+A. This copy emits `ld a,(de)` followed by `ld (hl),a`.
+
+```text
+(src, dst) → (DE, HL)
+A = *src
+*dst = A
+```
+
+```asm
+    ld a, (de)
+    ld (hl), a
+```
+
+### Indexed bytes
+
+An IX or IY pointer accepts a constant displacement from −128 to 127. The host assembler
+resolves symbolic offsets.
+
+```text
+previous(cursor → IX) → A { return cursor[-1] }
+```
+
+```asm
+previous:
+    ld a, (ix - 1)
+    ret
+```
+
+### Typed structure fields
+
+A layout name supplies the offset prefix and is checked even when the pointer is passed by
+register or alias. A byte load below uses `VID_CTX.config` for `asm` and `VID_CTX_config` for
+`z80asm`. The caller supplies the actual address.
+
+```text
+config(ctx: VID_CTX → IY) → A { return ctx->config }
+```
+
+```asm
+config:
+    ld a, (iy + VID_CTX.config)
+    ret
+```
+
+### Word fields
+
+Fields default to `u8`. Declare `u16` to read or write two bytes, low byte first. Both offsets
+must fit the index range. BC, DE and HL can hold the word. Stores also accept constants.
+
+```text
+field DRV_HEADER.ops: u16
+install(h: DRV_HEADER → IY, table → HL) { h->ops = table }
+```
+
+```asm
+install:
+    ld (iy + DRV_HEADER.ops), l
+    ld (iy + DRV_HEADER.ops + 1), h
+    ret
+```
+
+### External data addresses
+
+Declare an assembly data symbol with `extern data` and take its address with `&`. The `z80asm`
+target emits `EXTERN` for referenced data.
+
+```text
+extern data bs_storage_ops
+table_address() → HL { return &bs_storage_ops }
+```
+
+```asm
+table_address:
+    ld hl, bs_storage_ops
+    ret
+```
+
+### Assembler constants
+
+Uppercase names and qualified offsets remain symbolic. The host assembler supplies their values
+and bank addresses.
+
+```text
+A = VID_CTX.slot0 ^ VID_CTX.slot1
+```
+
+```asm
+    ld a, 0 + (VID_CTX.slot0 ^ VID_CTX.slot1)
+```
 
 ## Arithmetic and bits
 
@@ -379,145 +750,6 @@ sbc(A, E)
     sbc a, e
 ```
 
-### Counted loops
-
-`repeat` runs the body, then decrements B using `djnz`, preserving flags for the loop test. An
-initial zero gives 256 iterations if the body leaves B alone. For a potentially out-of-range
-back edge EXX uses a nearby `djnz` and absolute jumps.
-
-```text
-count → B
-count = 16
-repeat (count) {
-    *HL = A
-    HL += 1
-}
-```
-
-```asm
-    ld b, 16
-exx__example_1:
-    ld (hl), a
-    inc hl
-    djnz exx__example_1
-```
-
-### Early loop exit
-
-`break` exits the innermost `while` or `repeat`. Here a zero byte exits before either HL or B changes.
-
-```text
-repeat (B) {
-    if (!(A = *HL)) break
-    HL += 1
-}
-```
-
-```asm
-exx__example_1:
-    ld a, (hl)
-    or a
-    jp z, exx__example_2
-    inc hl
-    djnz exx__example_1
-exx__example_2:
-```
-
-## Memory and symbols
-
-### Byte pointers
-
-`*ptr` accesses the byte addressed by BC, DE, HL, IX or IY. Transfers through BC and DE require
-A. This copy emits `ld a,(de)` followed by `ld (hl),a`.
-
-```text
-(src, dst) → (DE, HL)
-A = *src
-*dst = A
-```
-
-```asm
-    ld a, (de)
-    ld (hl), a
-```
-
-### Indexed bytes
-
-An IX or IY pointer accepts a constant displacement from −128 to 127. The host assembler
-resolves symbolic offsets.
-
-```text
-previous(cursor → IX) → A { return cursor[-1] }
-```
-
-```asm
-previous:
-    ld a, (ix - 1)
-    ret
-```
-
-### Typed structure fields
-
-A layout name supplies the offset prefix and is checked even when the pointer is passed by
-register or alias. A byte load below uses `VID_CTX.config` for `asm` and `VID_CTX_config` for
-`z80asm`. The caller supplies the actual address.
-
-```text
-config(ctx: VID_CTX → IY) → A { return ctx->config }
-```
-
-```asm
-config:
-    ld a, (iy + VID_CTX.config)
-    ret
-```
-
-### Word fields
-
-Fields default to `u8`. Declare `u16` to read or write two bytes, low byte first. Both offsets
-must fit the index range. BC, DE and HL can hold the word. Stores also accept constants.
-
-```text
-field DRV_HEADER.ops: u16
-install(h: DRV_HEADER → IY, table → HL) { h->ops = table }
-```
-
-```asm
-install:
-    ld (iy + DRV_HEADER.ops), l
-    ld (iy + DRV_HEADER.ops + 1), h
-    ret
-```
-
-### External data addresses
-
-Declare an assembly data symbol with `extern data` and take its address with `&`. The `z80asm`
-target emits `EXTERN` for referenced data.
-
-```text
-extern data bs_storage_ops
-table_address() → HL { return &bs_storage_ops }
-```
-
-```asm
-table_address:
-    ld hl, bs_storage_ops
-    ret
-```
-
-### Assembler constants
-
-Uppercase names and qualified offsets remain symbolic. The host assembler supplies their values
-and bank addresses.
-
-```text
-A = VID_CTX.slot0 ^ VID_CTX.slot1
-```
-
-```asm
-    ld a, 0 + (VID_CTX.slot0 ^ VID_CTX.slot1)
-```
-
 ## Stack and register banks
 
 ### Scoped register saves
@@ -715,3 +947,82 @@ otir(C, HL, B)
 ```asm
     otir
 ```
+
+## Compiler development
+
+### CPU platform registration
+
+The tokenizer and parser in `exxlang/tokenizer.py` and `exxlang/parser.py` build nodes from
+`exxlang/syntax.py`. A registered platform defines register overlap, selects instructions and
+records their effects. Branches describe their destination and fallthrough for the shared flow
+analysis. The Z80 implementation starts with this declaration.
+[Z80 platform](exxlang/platforms/z80.py)
+
+```python
+@platforms.register
+class Z80:
+    name = "z80"
+    ...
+```
+
+### Assembler target registration
+
+A target declares its supported platforms and can override the assembly header and operand
+spelling. The registries discover modules in `exxlang/platforms/` and `exxlang/targets/`. The
+CLI uses the registered names to check the selected combination.
+[Plain ASM target](exxlang/targets/asm.py)
+
+```python
+@targets.register
+class PlainAsm(Assembler):
+    name = "asm"
+    platforms = ("z80",)
+```
+
+### Assembly text regression tests
+
+The unit suite runs each `examples/*.exx` through the CLI and compares its complete output to
+`tests/golden/asm/` and `tests/golden/z80asm/`. A mismatch shows the changed lines. Review the
+reference files when changing the output intentionally. Tokenizer, parser and register contracts
+have dedicated tests. CPU-specific tests live in `tests/platforms/`.
+
+```sh
+python3 -m unittest discover -s tests
+```
+
+### Binary comparison
+
+The assembly check compares both binaries for every example. The DuoConf fixture supplies
+matching layout constants and four external helper stubs at the same addresses. Put sjasmplus
+and z88dk-z80asm on PATH or select them with `--sjasmplus PATH` and `--z80asm PATH`.
+
+```sh
+python3 tests/assemble_examples.py
+```
+
+## Complete examples
+
+- [buffer.exx](examples/buffer.exx) — symbol addresses, word fields and bounded buffer copying. [asm](tests/golden/asm/buffer.asm) · [z80asm](tests/golden/z80asm/buffer.asm)
+- [transfer.exx](examples/transfer.exx) — stack saves, shadow registers and port access. [asm](tests/golden/asm/transfer.asm) · [z80asm](tests/golden/z80asm/transfer.asm)
+- [bit_operations.exx](examples/bit_operations.exx) — indexed bits and a signed shift across two registers. [asm](tests/golden/asm/bit_operations.asm) · [z80asm](tests/golden/z80asm/bit_operations.asm)
+- [video_plan_plane.exx](examples/video_plan_plane.exx) — DuoConf plane selection with external calls and flag results. [asm](tests/golden/asm/video_plan_plane.asm) · [z80asm](tests/golden/z80asm/video_plan_plane.asm)
+- [sdk_console_cursor.exx](examples/sdk_console_cursor.exx) — the two zxevo-sdk cursor routines with their BC/DE ABI. [asm](tests/golden/asm/sdk_console_cursor.asm) · [z80asm](tests/golden/z80asm/sdk_console_cursor.asm)
+- [advance_block.exx](examples/advance_block.exx) — loop with three results in A, HL and DE. [asm](tests/golden/asm/advance_block.asm) · [z80asm](tests/golden/z80asm/advance_block.asm)
+
+## Language comparison
+
+| Language | Strengths and typical uses | Limitations |
+| --- | --- | --- |
+| **EXX** | Register names and flags are part of the interface. A driver can return a status in CF alongside a byte in A, and `keep(BC)` can preserve a caller’s counter across several exits. EXX checks these contracts across branches and calls. | You choose working registers and write the moves. Even a byte comparison between C and D needs an explicit accumulator load. Algorithms with many intermediate values require more bookkeeping. |
+| **Wiz** | Structures, arrays, pointers and individual bits make hardware data layouts readable. A field such as `monster.flags$0` names a bit directly. Banks and compile-time expressions are useful for game data and memory maps. | Expression selection depends on the target CPU’s registers and addressing modes. An expression with no instruction match must be split into supported steps. Moving hardware-specific code to another Wiz target can require rewriting it. [Wiz language guide](https://github.com/wiz-lang/wiz) · [Z80 bit-field examples](https://github.com/wiz-lang/wiz/blob/5a8ea1ce15953d6ed9d222a54a31cb6447c79121/tests/block/z80_bitindex_i8.wiz) |
+| **Z80HLA** | Structured loops and branches fit hand-written instruction sequences. A loop can end with `dec a` followed by `while(nz)`, using the flag that the decrement just set. Structures and unions give names to data layouts. | The programmer selects loads, temporaries and arithmetic instructions. A `function` declaration has an empty parameter list, so callers must track the argument registers and flag results by convention. [Z80HLA manual](https://github.com/internalregister/z80hla/blob/master/MANUAL.md) |
+| **C with SDCC** | Locals, pointers, arrays and compound expressions suit parsers, state machines and buffer algorithms. The optimizer allocates registers, so adding an intermediate value rarely requires reorganizing the whole routine. | The generated instruction sequence depends on optimization. For a loop with a fixed cycle budget, inspect the generated ASM. A hardware flag used as an extra return value can require an assembly wrapper. [SDCC manual](https://sdcc.sourceforge.net/doc/sdccman.pdf) |
+
+### Build integration
+
+| Tool | Output and integration |
+| --- | --- |
+| **EXX** | Include the generated `asm` in the host assembler, or assemble the `z80asm` output with `z88dk-z80asm` and link the object. [Build a module](#build-a-module) |
+| **Wiz** | Wiz lays out banks and writes a raw binary or a supported console ROM image. When embedding a separately built binary, the host project must agree on placement and external addresses. [Wiz output formats](https://github.com/wiz-lang/wiz#features) |
+| **Z80HLA** | The assembler reads one entry file, follows its includes and writes a binary. An instruction listing is optional. [Z80HLA command-line options](https://github.com/internalregister/z80hla#using-it) |
+| **SDCC** | Use `sdcc -mz80 -c` to build a relocatable object for a compatible linker, or `sdcc -mz80 -S` to inspect the assembly. Mixed C and ASM modules must agree on the calling convention. [SDCC manual](https://sdcc.sourceforge.net/doc/sdccman.pdf) |
