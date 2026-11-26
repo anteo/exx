@@ -14,6 +14,11 @@ app_id="local.anteo.exx-file-type"
 destination="$applications/$app_name"
 lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
+built_app=${1:-"$src/../../build/quicklook/$app_name"}
+if [[ $# -eq 0 ]]; then
+    make -C "$src" build
+fi
+
 mkdir -p "$applications"
 stage="$applications/.exx-quicklook-install"
 if ! mkdir "$stage"; then
@@ -21,7 +26,6 @@ if ! mkdir "$stage"; then
     exit 1
 fi
 app="$stage/$app_name"
-extension="$app/Contents/PlugIns/$extension_name"
 previous="$stage/Previous.app"
 replacing=no
 installed=no
@@ -62,15 +66,7 @@ if [[ -e "$destination" || -L "$destination" ]]; then
     fi
 fi
 
-mkdir -p "$app/Contents/MacOS" "$extension/Contents/MacOS"
-cp "$src/App-Info.plist" "$app/Contents/Info.plist"
-cp "$src/Preview-Info.plist" "$extension/Contents/Info.plist"
-xcrun clang -mmacosx-version-min=12.0 "$src/AppMain.c" -o "$app/Contents/MacOS/EXXFileType"
-xcrun swiftc -O -target "$(uname -m)-apple-macosx12.0" -parse-as-library \
-    -module-name EXXPreview -application-extension -Xlinker -e -Xlinker _NSExtensionMain \
-    "$src/PreviewProvider.swift" -o "$extension/Contents/MacOS/EXXPreview"
-codesign --force --sign - --entitlements "$src/Preview.entitlements" "$extension"
-codesign --force --sign - "$app"
+/usr/bin/ditto "$built_app" "$app"
 
 if [[ -e "$destination" ]]; then
     mv "$destination" "$previous"

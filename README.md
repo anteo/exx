@@ -140,11 +140,13 @@ for keywords, Z80 registers, flags, numbers, strings and comments.
 Build and install it from the repository root with the macOS developer tools.
 
 ```sh
-./tools/macos-quicklook/install.sh
+make quicklook-install
 ```
 
 The installer registers the extension in `~/Applications/EXX File Type.app`.
 Select an EXX file in Finder and press Space.
+To build the app separately, run `make quicklook`. The signed app is in
+`build/quicklook/`.
 
 ## Automatic branch selection
 

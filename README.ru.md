@@ -141,11 +141,13 @@ build/%.asm: src/%.exx $(EXX_TOOL_DEPS)
 инструменты разработки macOS. Запустите из корня репозитория.
 
 ```sh
-./tools/macos-quicklook/install.sh
+make quicklook-install
 ```
 
 Скрипт регистрирует расширение в `~/Applications/EXX File Type.app`.
 Выберите файл EXX в Finder и нажмите пробел.
+Для отдельной сборки выполните `make quicklook`. Подписанное приложение
+появится в `build/quicklook/`.
 
 ## Автоматический выбор длины перехода
 
