@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import operator
 
 from .diagnostics import ExxError
+from .flow import Flow
 from .parser import parse
 from .ir import Instruction, Operand, TargetError
 from .registry import platforms
@@ -251,6 +252,13 @@ class Lowering:
 
     def call(self, expr, targets=None, tail=False):
         callee = self.symbols.get(expr.value)
+        if callee is None and expr.value in self.cpu.load_names:
+            if tail or targets is None or len(targets) != 1:
+                raise ExxError(expr.line, f"assign the result of {expr.value} to one register")
+            dst = self.operand(targets[0])
+            args = tuple(self.operand(arg) for arg in expr.args)
+            self.target_code(self.cpu.load_intrinsic(expr.value, dst, args), expr.line)
+            return
         if callee is None and expr.value in self.cpu.update_names:
             if targets is not None or tail:
                 raise ExxError(expr.line, f"use {expr.value} as a statement")
@@ -417,20 +425,17 @@ class Lowering:
         labels = {s.instruction.operands[0]: i for i, s in enumerate(self.steps)
                   if s.instruction.mnemonic == "label"}
         # Definite assignment at joins is intersection, also on loop back edges.
-        states = {0: parts(self.cpu, (p.register for p in self.proc.params))}
+        inputs = parts(self.cpu, (p.register for p in self.proc.params))
+        layout = self.cpu.storage_layout
+        protected = {cell: name for name, cells in layout.items() if name not in self.writable for cell in cells}
+        states = {0: Flow.entry(layout, inputs)}
         queue = deque([0])
         while queue:
             index = queue.popleft()
             step = self.steps[index]
             ins = step.instruction
-            available = states[index]
-            if ins.reads - available:
-                missing = ", ".join(sorted(ins.reads - available))
-                raise ExxError(step.line, f"{missing} unavailable (uninitialized or clobbered)")
-            changed = (ins.writes | step.kills) - self.writable
-            if changed:
-                raise ExxError(step.line, f"undeclared clobber: {', '.join(sorted(changed))}")
-            after = (available - step.kills) | ins.writes
+            exit_path = ins.mnemonic == "end" or (not ins.falls_through and ins.branch_target is None)
+            after = states[index].advance(step, layout, protected, exit_path)
             if ins.mnemonic == "end":
                 if self.proc.outputs:
                     raise ExxError(step.line, f"{self.proc.name} can reach the end without returning its results")
@@ -439,7 +444,7 @@ class Lowering:
             if ins.branch_target is not None:
                 successors.append(labels[ins.branch_target])
             for dest in successors:
-                merged = states[dest] & after if dest in states else after
+                merged = states[dest].merge(after, self.steps[dest].line) if dest in states else after
                 if dest not in states or states[dest] != merged:
                     states[dest] = merged
                     queue.append(dest)

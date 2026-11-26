@@ -3,7 +3,7 @@
 import re
 from typing import Callable
 
-from ..ir import Instruction, Operand, TargetError
+from ..ir import Instruction, Operand, TargetError, Transfer
 from ..registry import platforms
 
 
@@ -20,6 +20,31 @@ WORD_PARTS = {
 }
 LOAD_WORDS = frozenset(("BC", "DE", "HL", "IX", "IY", "SP"))
 INDEX_REGISTERS = frozenset(("IX", "IY"))
+SHADOW_PAIRS = ("AF", "BC", "DE", "HL")
+for _pair in SHADOW_PAIRS:
+    WORD_PARTS[_pair + "_ALT"] = frozenset(part + "_ALT" for part in WORD_PARTS[_pair])
+
+# Stack transfers may reinterpret a word as a different pair. Track each bit
+# so partial inputs, the six documented flags and index registers survive this.
+STORAGE = {name: tuple((name, i) for i in range(width))
+           for group, width in ((BYTE_REGISTERS, 8), (FLAGS, 1), (("IX", "IY", "SP"), 16))
+           for name in group}
+for _part in BYTE_REGISTERS | FLAGS:
+    STORAGE[_part + "_ALT"] = tuple((_part + "_ALT", i) for _, i in STORAGE[_part])
+
+
+def _word_cells(name):
+    if name in INDEX_REGISTERS:
+        return STORAGE[name]
+    pair = name.removesuffix("_ALT")
+    suffix = name[len(pair):]
+    if pair == "AF":
+        # F bits 3 and 5 have no portable value in the EXX ABI.
+        flags = ("CF", "N", "PV", None, "HF", None, "Z", "S")
+        low = tuple(STORAGE[f + suffix][0] if f else None for f in flags)
+    else:
+        low = STORAGE[pair[1] + suffix]
+    return low + STORAGE[pair[0] + suffix]
 UNSUPPORTED_REGISTERS = frozenset({
     "I", "R", "IXH", "IXL", "IYH", "IYL", "IXU", "IYU", "XH", "XL", "YH", "YL",
     "HX", "LX", "HY", "LY",
@@ -328,6 +353,17 @@ def shift(location, operation, count):
 
 
 def update_intrinsic(name, operands):
+    if name in _TRANSFER_NAMES:
+        return _transfer(name, operands)
+    if name in _BLOCK_OPS:
+        required, writes, invalidates = _BLOCK_OPS[name]
+        if operands and operands != tuple(register(r) for r in required):
+            raise TargetError(f"expected {name}() or {name}({', '.join(required)})")
+        reads = frozenset().union(*(resources(r) for r in required))
+        return (Instruction(name, reads=reads, writes=writes, invalidates=invalidates),)
+    if name == "out" and len(operands) == 2:
+        port, value = operands
+        return _port_instruction(False, value, port)
     if name in _SHIFT_MNEMONICS and len(operands) in (1, 2):
         count = operands[1] if len(operands) == 2 else Operand("imm", "1")
         return shift(operands[0], name, count)
@@ -338,6 +374,69 @@ def update_intrinsic(name, operands):
             return (Instruction(name, (_text(dst), _text(src)), _reads(dst) | _reads(src) | {"CF"},
                                 resources(dst.text) | FLAGS),)
     raise TargetError(f"invalid operands for {name}")
+
+
+_TRANSFER_NAMES = {"push", "pop", "ex", "exx", "ex_sp"}
+_STACK_PAIRS = {"AF", "BC", "DE", "HL", "IX", "IY"}
+
+
+def _transfer(name, operands):
+    names = tuple(op.text for op in operands if op.kind == "reg")
+    if len(names) != len(operands):
+        raise TargetError(f"{name} requires register pairs")
+    if len(names) == 1 and names[0] in _STACK_PAIRS:
+        word, = names
+        if name in ("push", "pop"):
+            return (Instruction(name, (word.lower(),), transfer=Transfer(name, _word_cells(word))),)
+        if name == "ex_sp" and word in ("HL", "IX", "IY"):
+            return (Instruction("ex", ("(sp)", word.lower()), transfer=Transfer("swap_stack", _word_cells(word))),)
+    if name == "ex" and names in (("DE", "HL"), ("HL", "DE")):
+        return (Instruction("ex", ("de", "hl"), transfer=Transfer("swap", _word_cells("DE"), _word_cells("HL"))),)
+    if (name == "ex" and names == ("AF",)) or (name == "exx" and not names):
+        pairs = names or ("BC", "DE", "HL")
+        active = tuple(cell for word in pairs for cell in _word_cells(word))
+        shadow = tuple(cell for word in pairs for cell in _word_cells(word + "_ALT"))
+        op = Transfer("swap", active, shadow)
+        return (Instruction(name, ("af", "af'") if name == "ex" else (), transfer=op),)
+    raise TargetError(f"unsupported register combination for {name}")
+
+
+def _port_instruction(read, data, port):
+    if data.kind != "reg" or data.text not in BYTE_REGISTERS:
+        raise TargetError("port I/O requires a byte register")
+    if port == register("BC"):
+        address, reads = "(c)", resources("BC")
+        flags = FLAGS - {"CF"}
+    elif port.kind == "imm" and data == register("A"):
+        _validate_immediate(port, 8)
+        address, reads = f"({_text(port)})", resources("A")
+        flags = frozenset()
+    else:
+        raise TargetError("port I/O requires BC, or an immediate low port byte with A")
+    if read:
+        return (Instruction("in", (_text(data), address), reads, resources(data.text) | flags),)
+    return (Instruction("out", (address, _text(data)), reads | resources(data.text)),)
+
+
+def load_intrinsic(name, dst, operands):
+    if name == "in" and len(operands) == 1:
+        return _port_instruction(True, dst, operands[0])
+    raise TargetError(f"invalid operands for {name}")
+
+
+_BLOCK_OPS = {}
+for _arguments, _writes, _unknown, _mnemonics in (
+    (("DE", "HL", "BC"), resources("DE") | resources("HL") | resources("BC") | {"HF", "PV", "N"},
+     frozenset(), ("ldi", "ldir", "ldd", "lddr")),
+    (("HL", "A", "BC"), resources("HL") | resources("BC") | (FLAGS - {"CF"}),
+     frozenset(), ("cpi", "cpir", "cpd", "cpdr")),
+    (("HL", "C", "B"), resources("HL") | {"B", "Z"},
+     FLAGS - {"Z"}, ("ini", "inir", "ind", "indr")),
+    (("C", "HL", "B"), resources("HL") | {"B", "Z"},
+     FLAGS - {"Z"}, ("outi", "otir", "outd", "otdr")),
+):
+    for _opcode in _mnemonics:
+        _BLOCK_OPS[_opcode] = _arguments, _writes, _unknown
 
 
 def jump(label: str) -> Instruction:
@@ -474,6 +573,7 @@ class Z80:
     reserved_abi = {"SP": "SP is reserved for balanced procedure calls"}
     unsupported_registers = UNSUPPORTED_REGISTERS
     layout_registers = tuple(sorted(INDEX_REGISTERS))
+    storage_layout = STORAGE
     register = staticmethod(register)
     resources = staticmethod(resources)
     field_operand = staticmethod(field_operand)
@@ -484,7 +584,9 @@ class Z80:
     bit_branch = staticmethod(bit_branch)
     bit_store = staticmethod(bit_store)
     complement = staticmethod(complement)
-    update_names = _SHIFT_MNEMONICS | {"adc", "sbc"}
+    update_names = _SHIFT_MNEMONICS | {"adc", "sbc", "out"} | _TRANSFER_NAMES | _BLOCK_OPS.keys()
+    load_names = {"in"}
+    load_intrinsic = staticmethod(load_intrinsic)
     update_intrinsic = staticmethod(update_intrinsic)
     branch = staticmethod(branch)
     jump = staticmethod(jump)

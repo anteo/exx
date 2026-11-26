@@ -517,3 +517,168 @@ A = VID_CTX.slot0 ^ VID_CTX.slot1
 ```asm
     ld a, 0 + (VID_CTX.slot0 ^ VID_CTX.slot1)
 ```
+
+## Stack and register banks
+
+### Stack saves
+
+`push` saves a word and `pop` restores it into the chosen pair. EXX tracks which parts were
+initialized across calls. A restored BC can be preserved by the caller’s ABI. Stack depth must
+match at joins and return to its entry value at every exit, including tail calls. SP is reserved
+for the call stack. Keep saved words intact when writing through pointers.
+
+```text
+extern work() clobbers(BC)
+run_preserving_bc() {
+    push(BC)
+    work()
+    pop(BC)
+}
+```
+
+```asm
+run_preserving_bc:
+    push bc
+    call work
+    pop bc
+    ret
+```
+
+### Register-pair exchange
+
+Exchange DE and HL in one instruction. Both `ex(DE, HL)` and `ex(HL, DE)` emit the same code.
+
+```text
+ex(DE, HL)
+```
+
+```asm
+    ex de, hl
+```
+
+### Exchange with the stack
+
+`ex_sp` exchanges HL, IX or IY with a saved word. Here IX receives the previous BC, then DE
+receives the previous IX.
+
+```text
+push(BC)
+ex_sp(IX)
+pop(DE)
+```
+
+```asm
+    push bc
+    ex (sp), ix
+    pop de
+```
+
+### Shadow registers
+
+`ex(AF)` selects `ex af,af'`. Use `exx()` to exchange BC, DE and HL with their shadow pairs together.
+Signatures can name `AF_ALT`, `BC_ALT`, `DE_ALT` and `HL_ALT`. The example writes the alternate
+HL and restores the active bank.
+
+```text
+set_alt_pointer(pointer → HL) clobbers(HL_ALT) {
+    push(pointer)
+    exx()
+    pop(HL)
+    exx()
+}
+```
+
+```asm
+set_alt_pointer:
+    push hl
+    exx
+    pop hl
+    exx
+    ret
+```
+
+## Ports and block operations
+
+### Port input
+
+With BC, `in` uses the full port address, updates flags and preserves CF. In the immediate
+form, `A = in(0xFE)`, incoming A supplies the high address byte and F is preserved.
+
+```text
+D = in(BC)
+```
+
+```asm
+    in d, (c)
+```
+
+### Port output
+
+`out(BC, E)` outputs E at the full BC address. In the immediate form shown here, A supplies
+both the high address byte and the value written. Both forms preserve F.
+
+```text
+out(0xFE, A)
+```
+
+```asm
+    out (254), a
+```
+
+### Block copy
+
+`ldir()` copies from HL to DE with BC as the count. An initial zero copies 65,536 bytes.
+Use `ldi`, `ldir`, `ldd` or `lddr` to choose direction and repetition.
+Every block operation accepts either empty parentheses or its full register list. Both forms
+read and modify the same registers and flags. The explicit form checks aliases in order:
+with the bindings below, `ldir(src, dst, count)` is a compile-time error.
+
+```text
+(dst, src, count) → (DE, HL, BC)
+ldir(dst, src, count)
+```
+
+```asm
+    ldir
+```
+
+### Block search
+
+`cpir()` compares A with bytes starting at HL until it finds a match or exhausts BC.
+The search family includes `cpi`, `cpir`, `cpd` and `cpdr`.
+
+```text
+cpir(HL, A, BC)
+```
+
+```asm
+    cpir
+```
+
+### Block input
+
+`inir()` fills memory starting at HL. C supplies the low port byte. B counts transfers and
+supplies the high port byte. The input family includes `ini`, `inir`, `ind` and `indr`.
+After block I/O the analyzer exposes Z and treats the
+remaining flags as clobbered.
+
+```text
+inir(HL, C, B)
+```
+
+```asm
+    inir
+```
+
+### Block output
+
+`otir()` sends bytes starting at HL to the port, advancing HL and decrementing B at each
+transfer. The output family includes `outi`, `otir`, `outd` and `otdr`.
+
+```text
+otir(C, HL, B)
+```
+
+```asm
+    otir
+```

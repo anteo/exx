@@ -1,0 +1,28 @@
+// Copy count bytes, preserving the caller's pointers, count and flags.
+// As with LDIR, a zero count copies 65536 bytes.
+copy_bytes(source → HL, destination → DE, count → BC) {
+    push(AF)
+    push(source)
+    push(destination)
+    push(count)
+    ldir(destination, source, count)
+    pop(count)
+    pop(destination)
+    pop(source)
+    pop(AF)
+}
+
+// Install a new pointer in the alternate HL, preserving the active bank.
+set_alt_pointer(pointer → HL) clobbers(HL_ALT) {
+    push(pointer)
+    exx()
+    pop(HL)
+    exx()
+}
+
+// Replace the port byte and return the value read before the write.
+replace_port_byte(port → BC, value → E) → A clobbers(S, Z, HF, PV, N) {
+    A = in(port)
+    out(port, value)
+    return A
+}

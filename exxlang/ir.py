@@ -15,6 +15,15 @@ class Operand:
 
 
 @dataclass(frozen=True)
+class Transfer:
+    """Ordered storage cells for a stack operation or simultaneous exchange."""
+
+    kind: str
+    first: tuple
+    second: tuple = ()
+
+
+@dataclass(frozen=True)
 class Instruction:
     mnemonic: str
     operands: tuple[str, ...] = ()
@@ -22,3 +31,5 @@ class Instruction:
     writes: frozenset[str] = frozenset()
     branch_target: str | None = None
     falls_through: bool = True
+    transfer: Transfer | None = None
+    invalidates: frozenset[str] = frozenset()
