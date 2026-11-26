@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.1.0
 
 ### Documentation
 
@@ -26,7 +26,10 @@
 - (compiler) support local labels and checked goto
 - (compiler) define and access typed static data
 - (quicklook) add macOS previews for EXX sources
+- (release) add EXX versioning and local release workflow
 
 ### Tests
 
 - (codegen) compare example output with assembly fixtures
+- (build) expose test suites through Make
+
