@@ -6,6 +6,7 @@ from .asm import PlainAsm
 @targets.register
 class Sjasmplus(PlainAsm):
     name = "sjasmplus"
+    local_label_prefix = "."
 
     def structure_lines(self, structures):
         result = []

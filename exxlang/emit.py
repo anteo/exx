@@ -2,6 +2,7 @@
 
 from collections import deque
 from hashlib import sha256
+import re
 
 from .ir import Directive, StaticData
 from .registry import targets
@@ -9,6 +10,7 @@ from .syntax import AsmBlock
 
 
 DEFAULT_INDENT = 4
+_INTERNAL_LABEL = re.compile(r"\bexx__\w+\b")
 
 
 def _asm_lines(text):
@@ -26,6 +28,7 @@ class Assembler:
     name: str
     platforms: tuple[str, ...]
     indent = " " * DEFAULT_INDENT
+    local_label_prefix = ""
 
     def header(self, procedures, section):
         return []
@@ -38,6 +41,17 @@ class Assembler:
 
     def constant(self, name, value):
         return f"{name} EQU {value}"
+
+    def local_labels(self, procedure):
+        # An assembler block can change the anchor for local labels.
+        if not self.local_label_prefix or any(ins.mnemonic == "asm" for ins in procedure.instructions):
+            return {}
+        owner = f"exx__{procedure.name}_"
+        return {
+            name: f"{self.local_label_prefix}exx__{name.removeprefix(owner)}"
+            for ins in procedure.instructions if ins.mnemonic == "label"
+            for name in ins.operands if name.startswith(owner)
+        }
 
     def emit(self, procedures, section, includes, *, layouts_only=False, indent=DEFAULT_INDENT):
         if indent < 1:
@@ -88,13 +102,18 @@ class Assembler:
             procedure = item
             if procedure.platform not in self.platforms:
                 raise ValueError(f"{self.name} cannot emit {procedure.platform} instructions")
+            local_labels = self.local_labels(procedure)
             lines.append(f"{procedure.name}:")
             for ins in procedure.instructions:
                 emit_comments(ins.source_offset, padding)
                 if ins.mnemonic == "asm":
                     lines.extend(_asm_lines(ins.operands[0]))
                     continue
-                operands = self.operands(ins.operands)
+                operands = ins.operands
+                if local_labels:
+                    operands = tuple(_INTERNAL_LABEL.sub(lambda match: local_labels.get(match[0], match[0]), operand)
+                                     for operand in operands)
+                operands = self.operands(operands)
                 if ins.mnemonic == "label":
                     lines.append(f"{operands}:")
                 else:

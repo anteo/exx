@@ -11,24 +11,24 @@
 select_ops:
     ld hl, bs_storage_ops
     cp DUO_TSCONF
-    jr nz, exx__select_ops_1
+    jr nz, @exx__1
     ld hl, ts_storage_ops
-exx__select_ops_1:
+@exx__1:
     ld (iy + DRV_HEADER_ops), l
     ld (iy + DRV_HEADER_ops + 1), h
     ret
 
 ; Copy up to B bytes, stopping before the first zero byte. B=0 means 256.
 copy_prefix:
-exx__copy_prefix_1:
+@exx__1:
     ld a, (de)
     or a
-    jr z, exx__copy_prefix_2
+    jr z, @exx__2
     ld (hl), a
     inc de
     inc hl
-    djnz exx__copy_prefix_1
-exx__copy_prefix_2:
+    djnz @exx__1
+@exx__2:
     ret
 
 ; Return the byte immediately before the cursor.

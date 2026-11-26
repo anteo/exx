@@ -95,7 +95,7 @@ def assemble_branch_limits(directory: Path, sjasmplus: str, z80asm: str) -> None
                           + body + "}}\n", encoding="utf-8")
         expected = (bytes.fromhex(branch) + bytes.fromhex("dd 36 01 03") * 31
                     + bytes([0x23]) * increments + bytes([0xc9]))
-        for target, tool in (("asm", sjasmplus), ("z80asm", z80asm)):
+        for target, tool in (("sjasmplus", sjasmplus), ("z80asm", z80asm)):
             if assemble(source, target, tool, directory / f"{target}-{increments}") != expected:
                 raise RuntimeError(f"{target}: incorrectly encoded conditional branch over {124 + increments} bytes")
     print("forward branches: both assemblers produced JR at +127 and JP beyond it")
@@ -108,10 +108,36 @@ def assemble_long_repeat(directory: Path, sjasmplus: str, z80asm: str) -> None:
                       "p += 1\n" * 130 + "}}\n", encoding="utf-8")
     # DJNZ skips the two-byte JR. On fallthrough JR skips the three-byte JP.
     expected = bytes([0x23]) * 130 + bytes.fromhex("10 02 18 03 c3 00 80 c9")
-    for target, tool in (("asm", sjasmplus), ("z80asm", z80asm)):
+    for target, tool in (("sjasmplus", sjasmplus), ("z80asm", z80asm)):
         if assemble(source, target, tool, directory / target) != expected:
             raise RuntimeError(f"{target}: incorrect long repeat branch encoding")
     print("long repeat: both assemblers produced the expected back edge and exit")
+
+
+def assemble_local_labels(directory: Path, sjasmplus: str, z80asm: str) -> None:
+    directory.mkdir()
+    source = directory / "local_labels.exx"
+    source.write_text("""walk_first(count → B) clobbers(B) { repeat(count) {} }
+walk_second(count → B) clobbers(B) { repeat(count) {} }
+walk_raw(count → B) clobbers(B) {
+    repeat(count) {
+        asm {
+raw_anchor:
+    nop
+        }
+    }
+}
+""", encoding="utf-8")
+    # Two short loops and a long back edge to walk_raw at $8006.
+    expected = bytes.fromhex("10 fe c9 10 fe c9 00 10 02 18 03 c3 06 80 c9")
+    for target, tool, prefix in (("sjasmplus", sjasmplus, "."), ("z80asm", z80asm, "@")):
+        output = directory / target
+        if assemble(source, target, tool, output) != expected:
+            raise RuntimeError(f"{target}: local labels changed the branch destinations")
+        listing = (output / "generated.asm").read_text(encoding="utf-8")
+        if listing.count(f"\n{prefix}exx__1:\n") != 2 or "\nexx__walk_raw_1:\n" not in listing:
+            raise RuntimeError(f"{target}: incorrect label spelling for EXX or mixed ASM procedures")
+    print("local labels: both assemblers resolved repeated local names and branches across inline ASM")
 
 
 def assemble_field_address(directory: Path, sjasmplus: str, z80asm: str) -> None:
@@ -233,6 +259,7 @@ def main() -> int:
             assemble_origin(Path(scratch) / "origin", args.sjasmplus, args.z80asm)
             assemble_branch_limits(Path(scratch) / "branches", args.sjasmplus, args.z80asm)
             assemble_long_repeat(Path(scratch) / "long", args.sjasmplus, args.z80asm)
+            assemble_local_labels(Path(scratch) / "labels", args.sjasmplus, args.z80asm)
             assemble_field_address(Path(scratch) / "word", args.sjasmplus, args.z80asm)
     except (OSError, RuntimeError) as error:
         print(error, file=sys.stderr)

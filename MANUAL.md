@@ -659,6 +659,11 @@ stay in its block or go to an enclosing block in the same procedure.
 An exit restores the pairs in any `keep` blocks it leaves. EXX checks
 register availability and stack state at the destination.
 
+The `sjasmplus` target emits procedure-local labels such as `.exx__1`, and
+`z80asm` emits `@exx__1`. The generic `asm` target and procedures containing
+an `asm` block use unique names such as `exx__fallback_1`. A label in inline
+assembly can change the scope of native local labels.
+
 ```text
 A fallback(ready → Z) {
     if (!ready) goto failed

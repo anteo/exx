@@ -11,6 +11,7 @@ _SYMBOL = re.compile(r"(?<![\w.])[A-Za-z_][A-Za-z_0-9]*(?:\.[A-Za-z_][A-Za-z_0-9
 class Z80Asm(Assembler):
     name = "z80asm"
     platforms = ("z80",)
+    local_label_prefix = "@"
 
     def __init__(self):
         self.symbols = {}

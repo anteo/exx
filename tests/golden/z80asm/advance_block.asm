@@ -9,19 +9,19 @@
 advance_block:
     ld a, b
     cp c
-    jr c, exx__advance_block_1
-    jr z, exx__advance_block_1
+    jr c, @exx__1
+    jr z, @exx__1
     ld a, c
-exx__advance_block_1:
+@exx__1:
     ld b, a
-exx__advance_block_2:
+@exx__2:
     or a
-    jr z, exx__advance_block_3
+    jr z, @exx__3
     inc hl
     dec de
     dec a
-    jr exx__advance_block_2
-exx__advance_block_3:
+    jr @exx__2
+@exx__3:
     ld a, b
     ret
 
