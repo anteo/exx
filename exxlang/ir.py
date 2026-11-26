@@ -12,6 +12,7 @@ class Operand:
     kind: str
     text: str
     width: int = 0
+    read_only: bool = False
 
 
 @dataclass(frozen=True)

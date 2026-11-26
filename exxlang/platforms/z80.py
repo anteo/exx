@@ -23,6 +23,8 @@ WORD_PARTS = {
 DATA_PAIRS = frozenset(("BC", "DE", "HL"))
 LOAD_WORDS = DATA_PAIRS | {"IX", "IY", "SP"}
 INDEX_REGISTERS = frozenset(("IX", "IY"))
+WORD_ADD_FLAGS = frozenset(("CF", "HF", "N"))
+STACK_WORD_SIZE = 2
 SHADOW_PAIRS = ("AF", "BC", "DE", "HL")
 for _pair in SHADOW_PAIRS:
     WORD_PARTS[_pair + "_ALT"] = frozenset(part + "_ALT" for part in WORD_PARTS[_pair])
@@ -245,6 +247,7 @@ def _field_word_move(dst, src):
 
 
 def move(dst: Operand, src: Operand) -> tuple[Instruction, ...]:
+    _require_writable(dst)
     for operand in (dst, src):
         if operand.kind == "mem" and operand.width == 16 and _indirect(operand)[0] in INDEX_REGISTERS:
             return _field_word_move(dst, src)
@@ -323,6 +326,7 @@ def step_register(dst: Operand, op: str) -> Instruction:
 
 
 def binary(dst: Operand, op: str, src: Operand) -> tuple[Instruction, ...]:
+    _require_writable(dst)
     op = op.removesuffix("=")
     if op in ("<<", ">>"):
         return shift(dst, op, src)
@@ -338,7 +342,7 @@ def binary(dst: Operand, op: str, src: Operand) -> tuple[Instruction, ...]:
     if op == "+" and dst.kind == src.kind == "reg" and dst.text in ("HL", "IX", "IY"):
         if src.text in ("BC", "DE", "SP", dst.text):
             reads = _reads(dst) | _reads(src)
-            writes = resources(dst.text) | {"CF", "HF", "N"}
+            writes = resources(dst.text) | WORD_ADD_FLAGS
             return (Instruction("add", (_text(dst), _text(src)), reads, writes,
                                 encoded_size=1 + _index_prefix(dst.text)),)
     if op == "-" and dst == register("HL") and src.kind == "reg" and src.text in DATA_PAIRS | {"SP"}:
@@ -375,6 +379,7 @@ def bit_branch(location, index, label, truth):
 
 
 def bit_store(location, index, value):
+    _require_writable(location)
     if value.kind != "imm" or value.text not in ("0", "1"):
         raise TargetError("assign true, false, 1 or 0 to a bit")
     return (bit_instruction("set" if value.text == "1" else "res", location, index),)
@@ -389,7 +394,13 @@ def complement(dst, src):
 _SHIFT_MNEMONICS = {"sra", "rlc", "rrc", "rl", "rr"}
 
 
+def _require_writable(operand):
+    if operand.read_only:
+        raise TargetError("stack parameters are read-only")
+
+
 def shift(location, operation, count):
+    _require_writable(location)
     n = _literal(count.text) if count.kind == "imm" else None
     if n is None or not 0 <= n <= 255:
         raise TargetError("shift or rotation count must be a known integer in 0..255")
@@ -608,12 +619,35 @@ def compact(code: list[Instruction]) -> tuple[Instruction, ...]:
     )
 
 
+def frame_displacement(offset, size):
+    displacement = offset + STACK_WORD_SIZE
+    if displacement + size - 1 > 127:
+        raise TargetError("stack parameter exceeds the Z80 frame displacement limit (+127)")
+    return displacement
+
+
+def setup_frame(frame, preserve_status):
+    # If AF is also saved, point past its word to the saved frame register.
+    offset = STACK_WORD_SIZE if preserve_status else 0
+    load, = move(frame, Operand("imm", str(offset)))
+    add, = binary(frame, "+", register("SP"))
+    # SP is managed by the procedure ABI. Address arithmetic has no EXX flag result.
+    add = replace(add, reads=resources(frame.text), writes=resources(frame.text), invalidates=WORD_ADD_FLAGS)
+    return load, add
+
+
 @platforms.register
 class Z80:
     name = "z80"
     reserved_abi = {"SP": "SP is reserved for balanced procedure calls"}
     unsupported_registers = UNSUPPORTED_REGISTERS
     layout_registers = tuple(sorted(INDEX_REGISTERS))
+    frame_registers = layout_registers
+    frame_flags = WORD_ADD_FLAGS
+    frame_status_register = "AF"
+    stack_return_size = STACK_WORD_SIZE
+    frame_displacement = staticmethod(frame_displacement)
+    setup_frame = staticmethod(setup_frame)
     storage_layout = STORAGE
     register = staticmethod(register)
     resources = staticmethod(resources)

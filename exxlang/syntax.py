@@ -39,9 +39,10 @@ class Stmt:
 @dataclass(frozen=True)
 class Param:
     name: str
-    register: str
+    register: str | None
     type_name: str | None
     line: int
+    stack_offset: int | None = None
 
 
 @dataclass(frozen=True)
@@ -55,12 +56,20 @@ class Proc:
     end_line: int
     start: int = 0
     end: int = 0
+    frame: str | None = None
 
 
 @dataclass(frozen=True)
 class Field:
     name: str
     type_name: str
+    line: int
+
+
+@dataclass(frozen=True)
+class Layout:
+    name: str
+    size: int
     line: int
 
 
@@ -79,3 +88,4 @@ class Program:
     data: tuple[DataSymbol, ...] = ()
     fields: tuple[Field, ...] = ()
     assembly: tuple[AsmBlock, ...] = ()
+    layouts: tuple[Layout, ...] = ()

@@ -116,7 +116,7 @@ def validate_group(cpu, names, line, allow_group=False):
 
 
 def abi_key(cpu, proc):
-    inputs = tuple((p.register, p.type_name) for p in proc.params)
+    inputs = tuple((p.register, p.type_name, p.stack_offset) for p in proc.params)
     return inputs, proc.outputs, parts(cpu, proc.clobbers) - parts(cpu, proc.outputs)
 
 
@@ -125,6 +125,7 @@ class Declarations:
     procedures: dict = field(default_factory=dict)
     data: dict = field(default_factory=dict)
     field_types: dict = field(default_factory=dict)
+    layout_sizes: dict = field(default_factory=dict)
 
     def data_address(self, symbol, externals):
         if symbol.kind != "name" or symbol.value not in self.data:
@@ -160,6 +161,49 @@ def lower_data(symbol, declarations, cpu):
     return StaticData(symbol.name, data_width, operand.text, frozenset(externals), symbol.start)
 
 
+def resolve_stack_arguments(cpu, proc, declarations):
+    stack = [p for p in proc.params if p.register is None]
+    if not stack and proc.frame is None:
+        return proc
+    frame_registers = getattr(cpu, "frame_registers", ())
+    if not frame_registers:
+        raise ExxError(proc.line, f"the {cpu.name} platform does not support stack parameters or frames")
+    if proc.frame is not None:
+        if proc.frame not in frame_registers:
+            raise ExxError(proc.line, "frame requires " + " or ".join(frame_registers))
+        abi_registers = tuple(p.register for p in proc.params if p.register is not None)
+        if cpu.resources(proc.frame) & parts(cpu, abi_registers + proc.outputs + proc.clobbers):
+            raise ExxError(proc.line, f"frame register {proc.frame} must be preserved by the procedure ABI")
+
+    cursor = cpu.stack_return_size
+    slots = []
+    params = []
+    for p in proc.params:
+        if p.register is not None:
+            params.append(p)
+            continue
+        width = _SCALAR_WIDTHS.get(p.type_name)
+        size = width // 8 if width else declarations.layout_sizes.get(p.type_name)
+        if size is None:
+            raise ExxError(p.line, f"unknown size of {p.type_name}; declare a layout for stack arguments")
+        start = cursor if p.stack_offset is None else p.stack_offset
+        end = start + size
+        if start < cpu.stack_return_size:
+            raise ExxError(p.line, f"stack parameter {p.name} overlaps the return address")
+        for lo, hi, name in slots:
+            if start < hi and lo < end:
+                raise ExxError(p.line, f"overlapping stack parameters {name} and {p.name}")
+        if proc.frame is not None:
+            try:
+                cpu.frame_displacement(start, size)
+            except TargetError as error:
+                raise ExxError(p.line, str(error)) from error
+        slots.append((start, end, p.name))
+        params.append(replace(p, stack_offset=start))
+        cursor = max(cursor, end)
+    return replace(proc, params=tuple(params))
+
+
 def collect_signatures(cpu, program, declarations, *, interface=False):
     if interface and program.assembly:
         raise ExxError(program.assembly[0].line, "an ABI file may only contain declarations")
@@ -184,23 +228,30 @@ def collect_signatures(cpu, program, declarations, *, interface=False):
         previous = declarations.field_types.setdefault(member.name, member.type_name)
         if previous != member.type_name:
             raise ExxError(member.line, f"conflicting field type for {member.name}")
+    for layout in program.layouts:
+        if layout.name in _SCALAR_WIDTHS or layout.size == 0:
+            raise ExxError(layout.line, "a layout requires a non-scalar name and a positive byte size")
+        previous = declarations.layout_sizes.setdefault(layout.name, layout.size)
+        if previous != layout.size:
+            raise ExxError(layout.line, f"conflicting layout size for {layout.name}")
     for proc in program.procs:
         if proc.name in declarations.data:
             raise ExxError(proc.line, f"{proc.name} is declared as data")
         if interface and proc.body is not None:
-            raise ExxError(proc.line, "a shared ABI file may only contain extern and field declarations")
+            raise ExxError(proc.line, "a shared ABI file may only contain extern, field and layout declarations")
         if proc.name.lower().startswith("exx__"):
             raise ExxError(proc.line, "the exx__ prefix is reserved for generated labels")
-        validate_group(cpu, (p.register for p in proc.params), proc.line)
+        validate_group(cpu, (p.register for p in proc.params if p.register is not None), proc.line)
         validate_group(cpu, proc.outputs, proc.line)
         validate_group(cpu, proc.clobbers, proc.line, allow_group=True)
         names = set()
         for p in proc.params:
             if p.name in names or (cpu.resources(p.name) and p.name != p.register):
                 raise ExxError(p.line, f"invalid or duplicate parameter name {p.name}")
-            if p.type_name and p.register not in cpu.layout_registers:
+            if p.register is not None and p.type_name and p.register not in cpu.layout_registers:
                 raise ExxError(p.line, "an EXX structure pointer requires " + " or ".join(cpu.layout_registers))
             names.add(p.name)
+        proc = resolve_stack_arguments(cpu, proc, declarations)
         previous = found.get(proc.name)
         if previous is not None:
             if abi_key(cpu, previous) != abi_key(cpu, proc):
@@ -217,14 +268,16 @@ class Lowering:
         self.proc = proc
         self.declarations = declarations
         self.symbols = declarations.procedures
-        self.aliases = {p.name: (p.register, p.type_name) for p in proc.params}
-        self.layouts = {p.register: p.type_name for p in proc.params if p.type_name}
+        self.aliases = {p.name: (p.register, p.type_name) for p in proc.params if p.register is not None}
+        self.layouts = {reg: layout for reg, layout in self.aliases.values() if layout}
+        self.stack_args = {p.name: p for p in proc.params if p.register is None}
         self.steps = []
         self.externals = set()
         self.counter = 0
         self.position = proc.start
         self.loop_exits = []
         self.kept_words = []
+        self.frame_active = False
         self.local_labels = {}
         self.scope = ()
         self.writable = parts(cpu, proc.outputs + proc.clobbers)
@@ -234,6 +287,15 @@ class Lowering:
         return f"exx__{self.proc.name}_{self.counter}"
 
     def emit(self, ins, line, kills=frozenset(), **keep):
+        if self.frame_active:
+            frame = self.proc.frame
+            transfer = ins.transfer
+            writes_frame = frame in ins.writes | ins.invalidates | kills
+            replaces_frame = (transfer is not None and transfer.kind in ("pop", "swap_stack")
+                              and transfer.first == self.cpu.storage_layout[frame]
+                              and "keep_slot" not in keep)
+            if writes_frame or replaces_frame:
+                raise ExxError(line, f"cannot modify active frame register {frame}")
         self.steps.append(Step(replace(ins, source_offset=self.position), line, kills, **keep))
 
     def mark(self, label, line):
@@ -270,22 +332,44 @@ class Lowering:
         reg, layout = self.aliases.get(base.value, (None, None))
         if base.kind != "name" or layout is None:
             raise ExxError(expr.line, "field access requires a typed " + " or ".join(self.cpu.layout_registers) + " binding")
+        return self.member_operand(reg, layout, path[::-1], expr.line)
 
-        offsets = []
-        while len(path) > 1:
-            name = f"{layout}.{path.pop()}"
+    def member_operand(self, reg, layout, path, line, *, prefix=()):
+        offsets = list(prefix)
+        for member in path[:-1]:
+            name = f"{layout}.{member}"
             layout = self.declarations.field_types.get(name)
             if layout is None or layout in _SCALAR_WIDTHS:
-                raise ExxError(expr.line, f"{name} requires a nested layout declaration")
+                raise ExxError(line, f"{name} requires a nested layout declaration")
             offsets.append(name)
-        member, = path
+        member = path[-1]
         type_name = self.declarations.field_types.get(f"{layout}.{member}", "u8")
         if type_name not in _SCALAR_WIDTHS:
-            raise ExxError(expr.line, f"{layout}.{member} is a nested layout; select a member")
+            raise ExxError(line, f"{layout}.{member} is a nested layout; select a member")
         return self.cpu.field_operand(reg, layout, member, _SCALAR_WIDTHS[type_name], prefix=offsets)
+
+    def stack_operand(self, param, path, line):
+        frame = self.proc.frame
+        if frame is None:
+            raise ExxError(line, f"reading stack parameter {param.name} requires a frame")
+        width = _SCALAR_WIDTHS.get(param.type_name)
+        if path and width:
+            raise ExxError(line, f"scalar stack parameter {param.name} has no members")
+        if not path and not width:
+            raise ExxError(line, f"select a member of stack parameter {param.name}")
+        displacement = self.cpu.frame_displacement(param.stack_offset, 1)
+        if path:
+            operand = self.member_operand(frame, param.type_name, path, line, prefix=(str(displacement),))
+        else:
+            address = self.cpu.indirect_operand(self.cpu.register(frame), Operand("imm", str(displacement)))
+            operand = replace(address, width=width)
+        return replace(operand, read_only=True)
 
     def operand(self, expr, width=0):
         if expr.kind == "name":
+            name, *path = expr.value.split(".")
+            if name in self.stack_args:
+                return self.stack_operand(self.stack_args[name], path, expr.line)
             if expr.value in self.aliases:
                 return self.cpu.register(self.aliases[expr.value][0])
             reg = self.cpu.register(expr.value)
@@ -300,7 +384,7 @@ class Lowering:
                 address = self.declarations.data_address(expr, self.externals)
                 return self.cpu.absolute_operand(address, _SCALAR_WIDTHS[declaration.type_name])
             # Constants and assembler structure offsets remain symbolic.
-            if expr.value.split(".")[0].isupper():
+            if name.isupper():
                 return Operand("imm", expr.value)
             raise ExxError(expr.line, f"unknown name {expr.value}")
         if expr.kind == "assign":
@@ -400,6 +484,8 @@ class Lowering:
             return
         if callee is None:
             raise ExxError(expr.line, f"undeclared procedure {expr.value}")
+        if any(p.register is None for p in callee.params):
+            raise ExxError(expr.line, f"EXX calls to {callee.name} with stack parameters require an asm block")
         if len(expr.args) != len(callee.params):
             raise ExxError(expr.line, f"{callee.name} expects {len(callee.params)} arguments")
         for arg, param in zip(expr.args, callee.params):
@@ -515,14 +601,16 @@ class Lowering:
             else:
                 raise ExxError(stmt.line, "return values overlap; prepare result registers explicitly")
 
+    def save_word(self, reg, line):
+        ins, = self.cpu.update_intrinsic("push", (reg,))
+        slot = len(self.steps)
+        self.emit(ins, line, keep_slot=slot)
+        self.kept_words.append((slot, reg))
+
     def keep(self, stmt):
         depth = len(self.kept_words)
         for arg in stmt.value.args:
-            reg = self.operand(arg)
-            ins, = self.cpu.update_intrinsic("push", (reg,))
-            slot = len(self.steps)
-            self.emit(ins, arg.line, keep_slot=slot)
-            self.kept_words.append((slot, reg))
+            self.save_word(self.operand(arg), arg.line)
         self.block(stmt.body)
         self.position = stmt.end
         self.restore_kept(depth, stmt.line)
@@ -560,7 +648,8 @@ class Lowering:
     def statement(self, stmt):
         if stmt.kind == "bind":
             for name, reg in stmt.value:
-                if name in self.aliases or self.cpu.resources(name) or not self.cpu.register(reg):
+                if (name in self.aliases or name in self.stack_args or self.cpu.resources(name)
+                        or not self.cpu.register(reg)):
                     raise ExxError(stmt.line, f"invalid binding {name} → {reg}")
                 self.aliases[name] = (reg, self.layouts.get(reg))
         elif stmt.kind == "assign":
@@ -619,14 +708,27 @@ class Lowering:
             raise ExxError(stmt.line, f"unsupported statement {stmt.kind!r}")
 
     def finish(self):
-        self.collect_labels(self.proc.body)
+        inputs = parts(self.cpu, (p.register for p in self.proc.params if p.register is not None))
+        if self.proc.frame is not None:
+            reg = self.cpu.register(self.proc.frame)
+            line = self.proc.line
+            self.save_word(reg, line)
+            flags = self.cpu.frame_flags
+            preserve_status = bool(flags - self.writable or flags & inputs)
+            if preserve_status:
+                self.save_word(self.cpu.register(self.cpu.frame_status_register), line)
+            self.target_code(self.cpu.setup_frame(reg, preserve_status), line)
+            if preserve_status:
+                self.restore_kept(1, line)
+                self.kept_words.pop()
+            self.frame_active = True
+        self.collect_labels(self.proc.body, keep_depth=len(self.kept_words))
         self.block(self.proc.body)
         self.position = self.proc.end
         self.returns(Stmt("return", self.proc.end_line))
         labels = {s.instruction.operands[0]: i for i, s in enumerate(self.steps)
                   if s.instruction.mnemonic == "label"}
         # Definite assignment at joins is intersection, also on loop back edges.
-        inputs = parts(self.cpu, (p.register for p in self.proc.params))
         layout = self.cpu.storage_layout
         protected = {cell: name for name, cells in layout.items() if name not in self.writable for cell in cells}
         states = {0: Flow.entry(layout, inputs)}
@@ -668,7 +770,7 @@ def compile_source(source: str, *, platform=None, interfaces=()) -> CompiledModu
     program = parse(source, comments=comments)
     collect_signatures(cpu, program, declared)
     data = tuple(lower_data(symbol, declared, cpu) for symbol in program.data if symbol.initializer is not None)
-    module = CompiledModule((Lowering(proc, declared, cpu).finish() for proc in program.procs
+    module = CompiledModule((Lowering(declared.procedures[proc.name], declared, cpu).finish() for proc in program.procs
                              if proc.body is not None), comments, program.assembly, data)
     layout = getattr(cpu, "layout_module", None)
     if layout is not None:

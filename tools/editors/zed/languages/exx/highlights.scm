@@ -6,7 +6,7 @@
 (type_name) @type
 
 [ "if" "else" "while" "repeat" "break" "goto" "return" "keep"
-  "extern" "data" "field" "clobbers" "asm" ] @keyword
+  "extern" "data" "field" "layout" "frame" "stack" "clobbers" "asm" ] @keyword
 
 [ (arrow) (assignment_operator) (postfix_operator) "→" "->" "=" "++" "--" "+" "-" "*" "!" "~" "$"
   "&" "|" "^" "&&" "||" "<<" ">>" "==" "!=" "<" "<=" ">" ">=" ] @operator

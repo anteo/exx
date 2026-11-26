@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 from .diagnostics import ExxError
-from .syntax import AsmBlock, DataSymbol, Expr, Field, Param, Proc, Program, Stmt
+from .syntax import AsmBlock, DataSymbol, Expr, Field, Layout, Param, Proc, Program, Stmt
 from .tokenizer import Token, tokenize
 
 
@@ -59,6 +59,14 @@ class _Parser:
             return self._advance()
         raise ExxError(self.token.line, f"expected a name, found {self._found()}")
 
+    def _integer(self) -> int:
+        token = self.token
+        if token.kind != "int":
+            raise ExxError(token.line, f"expected an integer, found {self._found()}")
+        self._advance()
+        radix = 0 if token.value.lower().startswith(("0x", "0b")) else 10
+        return int(token.value, radix)
+
     def _found(self) -> str:
         if self.token.kind == "eof":
             return "end of input"
@@ -86,6 +94,7 @@ class _Parser:
         data = []
         fields = []
         assembly = []
+        layouts = []
         self._skip_separators()
         while self.token.kind != "eof":
             line = self.token.line
@@ -102,10 +111,16 @@ class _Parser:
                 self._expect_statement_end()
             elif not is_extern and self.token.value == "asm":
                 assembly.append(self._assembly(file_scope=True))
+            elif not is_extern and self.token.value == "layout" and self.tokens[self.index + 1].kind == "name":
+                self._advance()
+                name = self._qualified_name()
+                self._expect(":")
+                layouts.append(Layout(name, self._integer(), line))
+                self._expect_statement_end()
             else:
                 procs.append(self._procedure(is_extern, line))
             self._skip_separators()
-        return Program(tuple(procs), tuple(data), tuple(fields), tuple(assembly))
+        return Program(tuple(procs), tuple(data), tuple(fields), tuple(assembly), tuple(layouts))
 
     def _data(self, is_extern):
         start = self._expect("data")
@@ -160,6 +175,13 @@ class _Parser:
                 if self._accept(")"):
                     break
                 self._expect(",")
+        frame = None
+        if is_extern and self.token.value == "frame":
+            raise ExxError(line, "frame belongs on the procedure definition")
+        if not is_extern and self._accept_after_newlines("frame"):
+            self._expect("(")
+            frame = self._expect_name().value
+            self._expect(")")
         clobbers = self._names() if self._accept_after_newlines("clobbers") else ()
         if is_extern:
             self._expect_statement_end()
@@ -169,15 +191,24 @@ class _Parser:
             body = self._block()
         end = self.tokens[self.index - 1]
         return Proc(name, tuple(params), outputs, clobbers, body, line,
-                    end_line=end.line, start=start, end=end.offset)
+                    end_line=end.line, start=start, end=end.offset, frame=frame)
 
     def _parameter(self) -> Param:
         name = self._expect_name()
         type_name = self._qualified_name() if self._accept(":") else None
-        if not self._accept("->"):
-            self._expect("→")
-        register = self._expect_name().value
-        return Param(name.value, register, type_name, name.line)
+        if not (self._accept("->") or self._accept("→")):
+            if type_name is None:
+                raise ExxError(name.line, "a parameter requires a register binding or a stack type")
+            return Param(name.value, None, type_name, name.line)
+        location = self._expect_name().value
+        if location != "stack":
+            return Param(name.value, location, type_name, name.line)
+        if type_name is None:
+            raise ExxError(name.line, "a stack parameter requires a type")
+        self._expect("[")
+        offset = self._integer()
+        self._expect("]")
+        return Param(name.value, None, type_name, name.line, offset)
 
     def _qualified_name(self) -> str:
         parts = [self._expect_name().value]
@@ -324,9 +355,7 @@ class _Parser:
             self._advance()
             return Expr("int", int(token.value == "true"), (), token.line)
         if token.kind == "int":
-            self._advance()
-            radix = 0 if token.value.lower().startswith(("0x", "0b")) else 10
-            return Expr("int", int(token.value, radix), (), token.line)
+            return Expr("int", self._integer(), (), token.line)
         if self._accept("("):
             if self._accept(")"):
                 return Expr("tuple", None, (), token.line)

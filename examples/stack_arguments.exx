@@ -1,0 +1,15 @@
+layout DRAW_SURFACE: 3
+field DRAW_SURFACE.page0: u8
+
+// The caller puts these arguments on the stack in declaration order.
+(A, C) cell_bytes(
+    mode: u8, surface: DRAW_SURFACE, x: u8, y: u8, character: u8
+) frame(IX) clobbers(CF, HF, N) {
+    C = character
+    A = surface.page0
+}
+
+// The caller's ABI puts the little-endian word at entry SP + 6.
+HL read_length(length: u16 → stack[6]) frame(IY) {
+    return length
+}

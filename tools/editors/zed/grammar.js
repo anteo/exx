@@ -14,16 +14,20 @@ module.exports = grammar({
 
   rules: {
     source_file: $ => repeat(choice($.procedure, $.external_procedure,
-      $.data_declaration, $.field_declaration, $.assembly, ';')),
+      $.data_declaration, $.field_declaration, $.layout_declaration, $.assembly, ';')),
 
-    procedure: $ => seq($._signature, $.block),
-    external_procedure: $ => seq('extern', $._signature),
+    procedure: $ => seq($._signature, optional($.frame), optional($.clobbers), $.block),
+    external_procedure: $ => seq('extern', $._signature, optional($.clobbers)),
     _signature: $ => seq(optional($.procedure_results), field('name', $.identifier),
-      '(', commaSep($.parameter), ')', optional($.clobbers)),
+      '(', commaSep($.parameter), ')'),
     procedure_results: $ => choice($.identifier,
       seq('(', $.identifier, repeat1(seq(',', $.identifier)), ')')),
-    parameter: $ => seq(field('name', $.identifier), optional($._type_annotation),
-      $.arrow, $.identifier),
+    parameter: $ => seq(field('name', $.identifier), choice(
+      seq($.arrow, $.identifier),
+      seq($._type_annotation, optional(seq($.arrow, choice($.identifier, $.stack_slot)))),
+    )),
+    stack_slot: $ => seq('stack', '[', $.number, ']'),
+    frame: $ => seq('frame', '(', $.identifier, ')'),
     _type_annotation: $ => seq(':', field('type', choice($.builtin_type, $.type_name))),
     type_name: $ => seq($.identifier, repeat(seq('.', $.identifier))),
     builtin_type: _ => choice('u8', 'u16'),
@@ -37,6 +41,7 @@ module.exports = grammar({
       seq('extern', 'data', field('name', $.identifier), optional($._type_annotation)),
     ),
     field_declaration: $ => seq('field', $.qualified_name, $._type_annotation),
+    layout_declaration: $ => seq('layout', $.type_name, ':', $.number),
     qualified_name: $ => seq($.identifier, repeat1(seq('.', $.identifier))),
 
     block: $ => seq('{', repeat(choice($._statement, ';')), '}'),

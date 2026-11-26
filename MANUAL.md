@@ -81,6 +81,127 @@ read_page:
     ret
 ```
 
+### Packed stack parameters
+
+A typed parameter without a register binding occupies a stack slot. EXX starts
+at offset 2 from SP on entry, just past the return address. It lays out stack
+parameters in declaration order without padding. A `u8` occupies one byte, a
+`u16` occupies two bytes in little-endian order, and register parameters take
+no stack space. Use `frame(IX)` or `frame(IY)` to read the argument slots.
+
+```text
+A read_character(mode: u8, pointer: u16, character: u8)
+    frame(IX) clobbers(CF, HF, N) {
+    return character
+}
+```
+
+```asm
+read_character:
+    push ix
+    ld ix, 0
+    add ix, sp
+    ld a, (ix + 7)
+    pop ix
+    ret
+```
+
+### Explicit stack slots
+
+`name: type → stack[n]` sets the byte offset from entry SP. Offsets 0 and 1 hold
+the return address. Slots must be disjoint. An implicit slot starts after all
+stack slots declared so far, including any explicitly placed ones. An `extern`
+declaration may express the same offsets in either form.
+
+```text
+HL read_length(length: u16 → stack[6]) frame(IY) {
+    return length
+}
+```
+
+```asm
+read_length:
+    push iy
+    push af
+    ld iy, 2
+    add iy, sp
+    pop af
+    ld l, (iy + 8)
+    ld h, (iy + 8 + 1)
+    pop iy
+    ret
+```
+
+### Stack frames
+
+`frame(IX)` or `frame(IY)` follows the parameter list and precedes
+`clobbers(...)`. The selected register points to its saved caller value.
+Arguments are therefore two bytes farther from the frame register than from
+entry SP. All bytes of a declared slot must fit the Z80 index displacement
+range. The frame register is available to the body and to register-ABI helpers
+that preserve it. EXX restores it on early returns, fallthrough, and tail jumps.
+
+```text
+extern inspect(frame_pointer → IY)
+A read_byte(value: u8) frame(IY) clobbers(CF, HF, N) {
+    inspect(IY)
+    A = value
+}
+```
+
+```asm
+read_byte:
+    push iy
+    ld iy, 0
+    add iy, sp
+    call inspect
+    ld a, (iy + 4)
+    pop iy
+    ret
+```
+
+If any of CF, HF, and N is an input or must be preserved, the prologue saves and
+restores AF around the address calculation, as in `read_length`. The frame
+register must be preserved by the procedure's ABI. A definition with unused
+stack parameters can omit the frame. Stack parameters are read-only. The
+caller removes the argument bytes after the return. Use an `asm` block to
+prepare an outgoing stack call.
+
+### Sizes of structures passed on the stack
+
+`layout NAME: size` gives EXX the byte size it needs to place a by-value
+argument on the stack. `field` declares the type of a member selected with a
+dot, such as `surface.page0`. A member without a `field` declaration defaults
+to `u8`. The `layout` and `field` declarations can go in a shared EXX ABI file.
+
+```text
+layout DRAW_SURFACE: 3
+field DRAW_SURFACE.page0: u8
+
+A read_page(mode: u8, surface: DRAW_SURFACE) frame(IX) clobbers(CF, HF, N) {
+    return surface.page0
+}
+```
+
+The assembler also needs the member's byte offset. For this example, the
+assembler input or an included file supplies the following definition:
+
+```asm
+DRAW_SURFACE.page0 equ 1
+```
+
+For z88dk-z80asm, write `DEFC DRAW_SURFACE_page0 = 1`.
+
+```asm
+read_page:
+    push ix
+    ld ix, 0
+    add ix, sp
+    ld a, (ix + 5 + DRAW_SURFACE.page0)
+    pop ix
+    ret
+```
+
 ### Local register aliases
 
 A local binding gives one register or a tuple of registers a name. Reading an alias reads the

@@ -45,6 +45,7 @@ def assemble(example: Path, target: str, assembler: str, directory: Path) -> byt
         "video_plan_plane": VIDEO_CONSTANTS,
         "bit_operations": {"PACKET.status": 0, "PACKET.flags": 1},
         "buffer": {"DRV_HEADER.ops": 6, "DUO_TSCONF": 1},
+        "stack_arguments": {"DRAW_SURFACE.page0": 1},
     }.get(example.stem, {})
     helpers = VIDEO_HELPERS if example.stem == "video_plan_plane" else ()
     data = ("bs_storage_ops", "ts_storage_ops") if example.stem == "buffer" else ()
