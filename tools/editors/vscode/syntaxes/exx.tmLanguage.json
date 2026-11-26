@@ -39,8 +39,7 @@
     },
     "abi-locations": {
       "patterns": [
-        { "name": "variable.language.register.exx", "match": "\\b(?:(?:AF|BC|DE|HL|[ABCDEHL])(?:_ALT)?|F|IX|IY|SP)\\b" },
-        { "name": "constant.language.flag.exx", "match": "\\b(?:CF|Z|S|PV|HF|N)(?:_ALT)?\\b" }
+        { "name": "variable.language.register.exx", "match": "\\b(?:(?:AF|BC|DE|HL|[ABCDEHL]|CF|Z|S|PV|HF|N)(?:_ALT)?|F|IX|IY|SP)\\b" }
       ]
     },
     "comments": {

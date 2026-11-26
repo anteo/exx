@@ -24,9 +24,7 @@
 ((identifier) @constant
   (#match? @constant "^[A-Z][A-Z0-9_]+$"))
 ((identifier) @variable.special
-  (#match? @variable.special "^((AF|BC|DE|HL|[ABCDEHL])(_ALT)?|F|IX|IY|SP)$"))
-((identifier) @constant.builtin
-  (#match? @constant.builtin "^(CF|Z|S|PV|HF|N)(_ALT)?$"))
+  (#match? @variable.special "^((AF|BC|DE|HL|[ABCDEHL]|CF|Z|S|PV|HF|N)(_ALT)?|F|IX|IY|SP)$"))
 
 ((assembly_word) @variable.special
   (#match? @variable.special "(?i)^((af|bc|de|hl)'?|ix[hl]?|iy[hl]?|sp|[abcdefhilr])$"))
