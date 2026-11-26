@@ -1,0 +1,7 @@
+id = "exx"
+name = "EXX"
+description = "Syntax highlighting for EXX high-level assembly."
+version = "0.1.0"
+schema_version = 1
+authors = ["EXX contributors"]
+repository = "https://github.com/anteo/exx"

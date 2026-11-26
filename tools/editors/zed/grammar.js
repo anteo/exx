@@ -1,0 +1,94 @@
+// This grammar provides editor structure and highlighting. EXX checks the ABI
+// and instruction operands when it translates the source.
+const binaryOperators = [
+  ['||'], ['&&'], ['|'], ['^'], ['&'], ['==', '!='],
+  ['<', '<=', '>', '>='], ['<<', '>>'], ['+', '-'],
+];
+
+const commaSep = rule => optional(seq(rule, repeat(seq(',', rule))));
+
+module.exports = grammar({
+  name: 'exx',
+  extras: $ => [/\s/, $.line_comment, $.block_comment],
+  word: $ => $.identifier,
+
+  rules: {
+    source_file: $ => repeat(choice($.procedure, $.external_procedure,
+      $.data_declaration, $.field_declaration, $.assembly, ';')),
+
+    procedure: $ => seq($._signature, $.block),
+    external_procedure: $ => seq('extern', $._signature),
+    _signature: $ => seq(field('name', $.identifier),
+      '(', commaSep($.parameter), ')', optional($.outputs), optional($.clobbers)),
+    parameter: $ => seq(field('name', $.identifier), optional($._type_annotation),
+      $.arrow, $.identifier),
+    _type_annotation: $ => seq(':', field('type', choice($.builtin_type, $.type_name))),
+    type_name: $ => seq($.identifier, repeat(seq('.', $.identifier))),
+    builtin_type: _ => choice('u8', 'u16'),
+    outputs: $ => seq($.arrow, choice($.identifier, $.name_list)),
+    clobbers: $ => seq('clobbers', $.name_list),
+    name_list: $ => seq('(', commaSep($.identifier), ')'),
+    arrow: _ => choice('→', '->'),
+
+    data_declaration: $ => choice(
+      seq('data', field('name', $.identifier), $._type_annotation, '=', $._expression),
+      seq('extern', 'data', field('name', $.identifier), optional($._type_annotation)),
+    ),
+    field_declaration: $ => seq('field', $.qualified_name, $._type_annotation),
+    qualified_name: $ => seq($.identifier, repeat1(seq('.', $.identifier))),
+
+    block: $ => seq('{', repeat(choice($._statement, ';')), '}'),
+    _statement: $ => choice(
+      $.if_statement, $.loop_statement, $.keep_statement, $.assembly,
+      $.label, $.goto_statement, $.return_statement, 'break',
+      $.assignment, $.binding, prec(1, $.call),
+    ),
+    _body: $ => prec.right(choice($.block, seq($._statement, optional(';')))),
+    if_statement: $ => prec.right(seq('if', '(', $._expression, ')', $._body,
+      optional(seq('else', $._body)))),
+    loop_statement: $ => seq(choice('while', 'repeat'), '(', $._expression, ')', $._body),
+    keep_statement: $ => seq('keep', $.name_list, $.block),
+    label: $ => seq(field('name', $.identifier), ':'),
+    goto_statement: $ => seq('goto', field('target', $.identifier)),
+    return_statement: $ => prec.right(seq('return', optional(choice(
+      token.immediate(prec(1, /[ \t]*(\r\n?|\n)/)), $._expression)))),
+    assignment: $ => seq($._expression, $.assignment_operator, $._expression),
+    binding: $ => seq($._expression, '→', choice($.identifier, $.name_list)),
+    assignment_operator: _ => choice('=', '^=', '+=', '-=', '&=', '|=', '<<=', '>>='),
+
+    _expression: $ => choice($.assignment_expression, $.binary_expression,
+      $.unary_expression, $.index_expression, $.bit_expression, $._atom),
+    _atom: $ => choice($.identifier, $.qualified_name, $.access, $.call,
+      $.number, $.boolean, $.tuple_or_group),
+    tuple_or_group: $ => seq('(', commaSep($._expression), ')'),
+    assignment_expression: $ => seq('(', $.identifier, '=', $._expression, ')'),
+    binary_expression: $ => choice(...binaryOperators.map((operators, index) =>
+      prec.left(index + 1, seq($._expression,
+        operators.length === 1 ? operators[0] : choice(...operators), $._expression)))),
+    unary_expression: $ => prec(10, seq(choice('!', '~', '+', '-', '*', '&'), $._expression)),
+    index_expression: $ => prec(11, seq($._expression, '[', $._expression, ']')),
+    bit_expression: $ => prec(12, seq($._expression, '$', $._atom)),
+    access: $ => seq(choice($.identifier, $.qualified_name), '->',
+      field('member', $.identifier), repeat(seq('.', field('member', $.identifier)))),
+    call: $ => prec(1, seq(field('function', choice($.identifier, $.qualified_name)),
+      '(', commaSep($._expression), ')')),
+    identifier: _ => /[a-zA-Z_][a-zA-Z_0-9]*/,
+    number: _ => /0[xX][0-9a-fA-F]+|0[bB][01]+|[0-9]+/,
+    boolean: _ => choice('true', 'false'),
+    line_comment: _ => token(seq('//', /[^\r\n]*/)),
+    block_comment: _ => token(seq('/*', /[^*]*\*+([^/*][^*]*\*+)*/, '/')),
+
+    assembly: $ => seq('asm', optional($.name_list), optional($.outputs),
+      optional($.clobbers), $.assembly_block),
+    assembly_block: $ => seq('{', repeat(choice($.assembly_block, $.assembly_comment,
+      $.assembly_string, $.assembly_number, $.assembly_word, $.assembly_punctuation)), '}'),
+    assembly_comment: _ => token(seq(';', /[^\r\n]*/)),
+    assembly_string: _ => token(choice(
+      /"([^"\\\r\n]|\\[^\r\n]|"")*"/,
+      /'([^'\\\r\n]|\\[^\r\n]|'')*'/,
+    )),
+    assembly_number: _ => /\$[0-9a-fA-F]+|%[01]+|0[xX][0-9a-fA-F]+|0[bB][01]+|[0-9][0-9a-fA-F]*[hH]|[0-9]+/,
+    assembly_word: _ => choice(/[.#]?[a-zA-Z_][a-zA-Z_0-9.]*/, /([Aa][Ff]|[Bb][Cc]|[Dd][Ee]|[Hh][Ll])'/),
+    assembly_punctuation: _ => /[^\s{}a-zA-Z_0-9;"']|["']/,
+  },
+});

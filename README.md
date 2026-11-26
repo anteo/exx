@@ -133,6 +133,28 @@ build/%.asm: src/%.exx $(EXX_TOOL_DEPS)
 	$(exx_compile)
 ```
 
+## Editor highlighting
+
+Zed and VS Code recognize `.exx` files and highlight EXX syntax and embedded
+Z80 assembly using the active theme. Run `make install` from the repository
+root to build and install the extensions for editors it finds. The installer
+prints a message for each missing editor and returns an error if a build or
+installation fails. It looks for `zed`, `zeditor`, and `code` on `PATH` and
+also checks the system and user Applications folders on macOS.
+
+- **Zed.** `make zed-install` registers `build/zed/exx` as a local dev extension.
+  Keep that directory while the extension is installed. Restart Zed if it was
+  open. To install through the editor, run `make zed` and
+  select `build/zed/exx` with **Install Dev Extension**. Building requires
+  Node.js and the [Tree-sitter CLI](https://tree-sitter.github.io/tree-sitter/cli/).
+  The first build may download the WASI SDK for Tree-sitter.
+- **VS Code.** `make vscode-install` uses the VS Code CLI. Set `CODE` to use a
+  specific executable. Building requires Node.js 20 or later and npm. For
+  installation through the editor, run `make vscode` and select `build/exx.vsix`
+  with **Extensions: Install from VSIX**.
+
+`make editors` builds both extensions and also builds Quick Look on macOS.
+
 ## Quick Look on macOS
 
 The Quick Look extension previews `.exx` files in Finder with highlighting

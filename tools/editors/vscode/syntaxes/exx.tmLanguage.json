@@ -1,0 +1,79 @@
+{
+  "name": "EXX",
+  "scopeName": "source.exx",
+  "patterns": [
+    { "include": "#assembly" },
+    { "include": "#exx" }
+  ],
+  "repository": {
+    "exx": {
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "match": "\\b(goto)[ \\t]+([a-zA-Z_]\\w*)",
+          "captures": { "1": { "name": "keyword.control.exx" }, "2": { "name": "entity.name.label.exx" } }
+        },
+        { "name": "keyword.control.exx", "match": "\\b(?:if|else|while|repeat|break|goto|return)\\b" },
+        { "name": "keyword.other.exx", "match": "\\b(?:extern|data|field|clobbers|keep|asm)\\b" },
+        { "name": "storage.type.exx", "match": "\\b(?:u8|u16)\\b" },
+        { "name": "constant.language.boolean.exx", "match": "\\b(?:true|false)\\b" },
+        { "name": "variable.language.register.exx", "match": "\\b(?:(?:AF|BC|DE|HL|[ABCDEHL])(?:_ALT)?|F|IX|IY|SP)\\b" },
+        { "name": "constant.language.flag.exx", "match": "\\b(?:CF|Z|S|PV|HF|N)(?:_ALT)?\\b" },
+        {
+          "match": "^[ \\t]*([a-zA-Z_]\\w*)(?=[ \\t]*:)",
+          "captures": { "1": { "name": "entity.name.label.exx" } }
+        },
+        { "name": "entity.name.function.exx", "match": "\\b[a-zA-Z_]\\w*(?:\\.[a-zA-Z_]\\w*)*(?=[ \\t]*\\()" },
+        { "name": "constant.other.symbol.exx", "match": "\\b[A-Z][A-Z0-9_]+\\b" },
+        { "name": "constant.numeric.exx", "match": "\\b(?:0[xX][0-9a-fA-F]+|0[bB][01]+|[0-9]+)\\b" },
+        { "name": "keyword.operator.exx", "match": "→|->|<<=?|>>=?|&&|\\|\\||[=!<>+&|^\\-]=?|[~*$]" },
+        { "name": "punctuation.separator.exx", "match": "[.,:;]" }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.exx", "match": "//.*$" },
+        { "name": "comment.block.exx", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+    "assembly": {
+      "name": "meta.assembly.exx",
+      "begin": "\\basm\\b",
+      "beginCaptures": { "0": { "name": "keyword.other.exx" } },
+      "end": "(?<=\\})",
+      "patterns": [
+        { "include": "#assembly-block" },
+        { "include": "#exx" }
+      ]
+    },
+    "assembly-block": {
+      "name": "meta.assembly.block.exx",
+      "begin": "\\{",
+      "end": "\\}",
+      "patterns": [
+        { "include": "#assembly-block" },
+        { "include": "#comments" },
+        { "name": "comment.line.semicolon.asm.exx", "match": ";.*$" },
+        {
+          "name": "string.quoted.double.asm.exx",
+          "begin": "\"",
+          "end": "\"|$",
+          "patterns": [{ "name": "constant.character.escape.asm.exx", "match": "\\\\.|\"\"" }],
+          "applyEndPatternLast": true
+        },
+        {
+          "name": "string.quoted.single.asm.exx",
+          "begin": "(?<![\\w'])'",
+          "end": "'|$",
+          "patterns": [{ "name": "constant.character.escape.asm.exx", "match": "\\\\.|''" }],
+          "applyEndPatternLast": true
+        },
+        { "name": "entity.name.label.asm.exx", "match": "(?:[.#])?\\b[A-Za-z_]\\w*(?=[ \\t]*:)" },
+        { "name": "variable.language.register.asm.exx", "match": "(?i)\\b(?:(?:af|bc|de|hl)\\b'?|ix[hl]?\\b|iy[hl]?\\b|sp\\b|[abcdefhilr]\\b)" },
+        { "name": "keyword.control.directive.asm.exx", "match": "(?i)(?<![\\w.])[.#]?(?:assert|align|db|dw|ds|def[bdsw]|define|else|endif|endm|equ|extern|if|ifdef|ifndef|incbin|include|macro|org|public|section)\\b" },
+        { "name": "keyword.other.instruction.asm.exx", "match": "(?i)(?<![\\w.])(?:adc|add|and|bit|call|ccf|cp|cp[di]r?|cpl|daa|dec|di|djnz|ei|ex|exx|halt|im|in|inc|in[di]r?|jp|jr|ld|ld[di]r?|neg|nop|or|ot[di]r|out[di]?|pop|push|res|ret[in]?|rl[ac]?|rlca|rld|rr[ac]?|rrca|rrd|rst|sbc|scf|set|sla|sll|sra|srl|sub|xor)\\b" },
+        { "name": "constant.numeric.asm.exx", "match": "(?i)(?<!\\w)(?:\\$[0-9a-f]+|%[01]+|0x[0-9a-f]+|0b[01]+|[0-9][0-9a-f]*h|[0-9]+)\\b" }
+      ]
+    }
+  }
+}

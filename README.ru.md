@@ -134,6 +134,28 @@ build/%.asm: src/%.exx $(EXX_TOOL_DEPS)
 	$(exx_compile)
 ```
 
+## Подсветка в редакторах
+
+Zed и VS Code распознают файлы `.exx` и подсвечивают синтаксис EXX и вставки
+Z80 ASM цветами текущей темы. `make install` из корня репозитория собирает и
+устанавливает расширения для найденных редакторов. Если редактор отсутствует,
+команда сообщает об этом и пропускает его. Ошибка сборки или установки даёт
+ненулевой код завершения. Поиск идёт по командам `zed`, `zeditor` и `code` в
+`PATH`, а на macOS ещё и по системной и пользовательской папкам Applications.
+
+- **Zed.** `make zed-install` регистрирует `build/zed/exx` как локальное расширение.
+  Этот каталог нужен и после установки. Если Zed открыт, перезапустите его.
+  Для установки через редактор выполните
+  `make zed` и укажите `build/zed/exx` через **Install Dev Extension**. Для сборки
+  нужны Node.js и [Tree-sitter CLI](https://tree-sitter.github.io/tree-sitter/cli/).
+  При первой сборке Tree-sitter может скачать WASI SDK.
+- **VS Code.** `make vscode-install` использует CLI редактора. Переменная `CODE`
+  задаёт путь к нужной команде. Для сборки нужны Node.js 20 или новее и npm.
+  Для установки через редактор выполните `make vscode` и укажите
+  `build/exx.vsix` через **Extensions: Install from VSIX**.
+
+`make editors` собирает оба расширения, а на macOS ещё и Quick Look.
+
 ## Quick Look в macOS
 
 Расширение Quick Look показывает `.exx` в Finder с подсветкой ключевых слов,

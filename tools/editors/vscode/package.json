@@ -1,0 +1,28 @@
+{
+  "name": "exx",
+  "displayName": "EXX",
+  "description": "Syntax highlighting for EXX high-level assembly.",
+  "version": "0.1.0",
+  "publisher": "anteo",
+  "repository": { "type": "git", "url": "https://github.com/anteo/exx.git" },
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages"],
+  "files": ["language-configuration.json", "syntaxes/"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "exx",
+        "aliases": ["EXX", "exx"],
+        "extensions": [".exx"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "exx",
+        "scopeName": "source.exx",
+        "path": "./syntaxes/exx.tmLanguage.json"
+      }
+    ]
+  }
+}
