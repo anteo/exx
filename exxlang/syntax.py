@@ -74,6 +74,13 @@ class Layout:
 
 
 @dataclass(frozen=True)
+class Struct:
+    name: str
+    members: tuple[Field, ...]
+    line: int
+
+
+@dataclass(frozen=True)
 class DataSymbol:
     name: str
     line: int
@@ -89,3 +96,4 @@ class Program:
     fields: tuple[Field, ...] = ()
     assembly: tuple[AsmBlock, ...] = ()
     layouts: tuple[Layout, ...] = ()
+    structs: tuple[Struct, ...] = ()

@@ -17,10 +17,10 @@ class Z80Tests(unittest.TestCase):
         self.assertTrue(z80.supports_layout("IX"))
         self.assertTrue(z80.supports_layout("IY"))
         self.assertFalse(z80.supports_layout("HL"))
-        self.assertEqual(z80.field_operand("IY", "VID_CTX", "config"),
+        self.assertEqual(z80.field_operand("IY", ("VID_CTX.config",)),
                          z80.Operand("mem", "IY + VID_CTX.config", 8))
         with self.assertRaises(z80.TargetError):
-            z80.field_operand("HL", "VID_CTX", "config")
+            z80.field_operand("HL", ("VID_CTX.config",))
 
     def test_rejects_invalid_loads_before_assembly(self):
         for destination, source in (

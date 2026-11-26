@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 from .diagnostics import ExxError
-from .syntax import AsmBlock, DataSymbol, Expr, Field, Layout, Param, Proc, Program, Stmt
+from .syntax import AsmBlock, DataSymbol, Expr, Field, Layout, Param, Proc, Program, Stmt, Struct
 from .tokenizer import Token, tokenize
 
 
@@ -95,32 +95,82 @@ class _Parser:
         fields = []
         assembly = []
         layouts = []
+        structs = []
         self._skip_separators()
         while self.token.kind != "eof":
             line = self.token.line
             is_extern = self._accept("extern")
-            if self.token.value == "data" and self.tokens[self.index + 1].kind == "name":
+            following = self.tokens[self.index + 1] if self.token.kind != "eof" else self.token
+            if self.token.value == "data" and following.kind == "name":
                 data.append(self._data(is_extern))
-            elif not is_extern and self.token.value == "field" and self.tokens[self.index + 1].kind == "name":
+            elif not is_extern and self.token.value == "field" and (following.kind == "name" or following.value == "{"):
+                self._advance()
+                self._declaration_group(lambda: self._field_entry(fields))
+            elif not is_extern and self.token.value == "layout" and (following.kind == "name" or following.value == "{"):
+                self._advance()
+                self._declaration_group(lambda: self._layout_entry(layouts, fields))
+            elif not is_extern and self.token.value == "struct" and following.kind == "name":
                 self._advance()
                 name = self._qualified_name()
-                if "." not in name:
-                    raise ExxError(line, "field declaration requires Layout.member")
-                self._expect(":")
-                fields.append(Field(name, self._qualified_name(), line))
-                self._expect_statement_end()
+                self._skip_newlines()
+                self._expect("{")
+                structs.append(Struct(name, self._members(), line))
             elif not is_extern and self.token.value == "asm":
                 assembly.append(self._assembly(file_scope=True))
-            elif not is_extern and self.token.value == "layout" and self.tokens[self.index + 1].kind == "name":
-                self._advance()
-                name = self._qualified_name()
-                self._expect(":")
-                layouts.append(Layout(name, self._integer(), line))
-                self._expect_statement_end()
             else:
                 procs.append(self._procedure(is_extern, line))
             self._skip_separators()
-        return Program(tuple(procs), tuple(data), tuple(fields), tuple(assembly), tuple(layouts))
+        return Program(tuple(procs), tuple(data), tuple(fields), tuple(assembly), tuple(layouts), tuple(structs))
+
+    def _declaration_group(self, entry):
+        if self._accept("{"):
+            self._declaration_entries(entry)
+        else:
+            entry()
+            self._expect_statement_end()
+
+    def _declaration_entries(self, entry):
+        self._skip_separators()
+        while not self._accept("}"):
+            entry()
+            if self.token.value == "}":
+                continue
+            if not self._accept(",") and self.token.value != ";" and self.token.kind != "newline":
+                raise ExxError(self.token.line, f"expected a declaration separator, found {self._found()}")
+            self._skip_separators()
+
+    def _members(self):
+        members = []
+
+        def member():
+            name = self._expect_name()
+            self._expect(":")
+            members.append(Field(name.value, self._qualified_name(), name.line))
+
+        self._declaration_entries(member)
+        return tuple(members)
+
+    def _grouped_fields(self, name, fields):
+        fields.extend(replace(member, name=f"{name}.{member.name}") for member in self._members())
+
+    def _field_entry(self, fields):
+        line = self.token.line
+        name = self._qualified_name()
+        if self._accept_after_newlines("{"):
+            self._grouped_fields(name, fields)
+        else:
+            if "." not in name:
+                raise ExxError(line, "field declaration requires Layout.member")
+            self._expect(":")
+            fields.append(Field(name, self._qualified_name(), line))
+
+    def _layout_entry(self, layouts, fields):
+        line = self.token.line
+        name = self._qualified_name()
+        self._expect(":")
+        layouts.append(Layout(name, self._integer(), line))
+        if self._accept_after_newlines("{"):
+            self._grouped_fields(name, fields)
 
     def _data(self, is_extern):
         start = self._expect("data")

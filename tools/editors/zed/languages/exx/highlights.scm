@@ -6,7 +6,7 @@
 (type_name) @type
 
 [ "if" "else" "while" "repeat" "break" "goto" "return" "keep"
-  "extern" "data" "field" "layout" "frame" "stack" "clobbers" "asm" ] @keyword
+  "extern" "data" "field" "layout" "struct" "frame" "stack" "clobbers" "asm" ] @keyword
 
 [ (arrow) (assignment_operator) (postfix_operator) "→" "->" "=" "++" "--" "+" "-" "*" "!" "~" "$"
   "&" "|" "^" "&&" "||" "<<" ">>" "==" "!=" "<" "<=" ">" ">=" ] @operator
@@ -17,6 +17,7 @@
 (external_procedure name: (identifier) @function)
 (call function: (_) @function)
 (parameter name: (identifier) @variable.parameter)
+(member_declaration name: (identifier) @property)
 (access member: (identifier) @property)
 (label name: (identifier) @label)
 (goto_statement target: (identifier) @label)

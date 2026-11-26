@@ -34,7 +34,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target", required=True, choices=targets.names(), help="assembler dialect")
     parser.add_argument("--platform", choices=platforms.names(), help="CPU (default selected by target)")
     parser.add_argument("--abi", type=Path, action="append", default=[], metavar="FILE",
-                        help="shared EXX procedure, data and field declarations (repeatable)")
+                        help="shared EXX ABI declarations (repeatable)")
+    parser.add_argument("--layouts-only", action="store_true", help="emit an assembly include of struct declarations")
     parser.add_argument("-o", "--output", type=Path, help="output file (default: stdout)")
     parser.add_argument("--section", default="code_user", help="section for z80asm output")
     parser.add_argument("--include", action="append", default=[], metavar="PATH",
@@ -49,7 +50,10 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError(f"{target.name} does not support platform {platform}")
         interfaces = [(path, path.read_text(encoding="utf-8")) for path in args.abi]
         procedures = compile_source(source, platform=platform, interfaces=interfaces)
-        assembly = target.emit(procedures, args.section, args.include)
+        if args.layouts_only:
+            assembly = target.emit(procedures, args.section, args.include, layouts_only=True)
+        else:
+            assembly = target.emit(procedures, args.section, args.include)
         if args.output is None:
             sys.stdout.write(assembly)
         else:

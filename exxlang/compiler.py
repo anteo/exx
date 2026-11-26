@@ -8,13 +8,13 @@ from .diagnostics import ExxError
 from .flow import Flow
 from .parser import parse
 from .ir import Instruction, Operand, StaticData, TargetError
+from .layouts import LayoutTable, SCALAR_WIDTHS as _SCALAR_WIDTHS
 from .registry import platforms
 from .syntax import Stmt
 
 
 _BINARY = {"+": operator.add, "-": operator.sub, "^": operator.xor,
            "&": operator.and_, "|": operator.or_, "<<": operator.lshift, ">>": operator.rshift}
-_SCALAR_WIDTHS = {"u8": 8, "u16": 16}
 
 
 @dataclass
@@ -30,11 +30,12 @@ class Procedure:
 class CompiledModule(list[Procedure]):
     """Lowered procedures and other module items in source order."""
 
-    def __init__(self, procedures, comments, assembly, data):
+    def __init__(self, procedures, comments, assembly, data, structs):
         super().__init__(procedures)
         self.comments = comments
         self.assembly = assembly
         self.data = data
+        self.structs = structs
 
 
 @dataclass
@@ -124,8 +125,7 @@ def abi_key(cpu, proc):
 class Declarations:
     procedures: dict = field(default_factory=dict)
     data: dict = field(default_factory=dict)
-    field_types: dict = field(default_factory=dict)
-    layout_sizes: dict = field(default_factory=dict)
+    layouts: LayoutTable = field(default_factory=LayoutTable)
 
     def data_address(self, symbol, externals):
         if symbol.kind != "name" or symbol.value not in self.data:
@@ -134,6 +134,14 @@ class Declarations:
         if declaration.initializer is None:
             externals.add(symbol.value)
         return Operand("imm", symbol.value, 16)
+
+    def layout_constant(self, name, line):
+        struct = self.layouts.definitions.get(name)
+        if struct is not None:
+            return Operand("imm", str(struct.size))
+        offset = self.layouts.native_offset(name, line)
+        if offset is not None:
+            return Operand("imm", f"({offset})" if " + " in offset else offset)
 
 
 def lower_data(symbol, declarations, cpu):
@@ -145,6 +153,10 @@ def lower_data(symbol, declarations, cpu):
             if data_width != 16:
                 raise ExxError(expr.line, "a data address initializer requires u16")
             return declarations.data_address(expr.args[0], externals)
+        if expr.kind == "name":
+            offset = declarations.layout_constant(expr.value, expr.line)
+            if offset is not None:
+                return offset
         if (expr.kind == "name" and expr.value.split(".")[0].isupper()
                 and expr.value not in declarations.data and not cpu.register(expr.value)
                 and expr.value not in cpu.unsupported_registers):
@@ -182,8 +194,7 @@ def resolve_stack_arguments(cpu, proc, declarations):
         if p.register is not None:
             params.append(p)
             continue
-        width = _SCALAR_WIDTHS.get(p.type_name)
-        size = width // 8 if width else declarations.layout_sizes.get(p.type_name)
+        size = declarations.layouts.size(p.type_name)
         if size is None:
             raise ExxError(p.line, f"unknown size of {p.type_name}; declare a layout for stack arguments")
         start = cursor if p.stack_offset is None else p.stack_offset
@@ -210,7 +221,8 @@ def collect_signatures(cpu, program, declarations, *, interface=False):
     found = declarations.procedures
     for symbol in program.data:
         name = symbol.name
-        if (name in found or name.lower().startswith("exx__") or cpu.register(name.upper())
+        if (name in found or name in declarations.layouts.definitions
+                or name.lower().startswith("exx__") or cpu.register(name.upper())
                 or name.upper() in cpu.unsupported_registers):
             raise ExxError(symbol.line, f"invalid or conflicting data symbol {name}")
         if interface and symbol.initializer is not None:
@@ -224,21 +236,13 @@ def collect_signatures(cpu, program, declarations, *, interface=False):
             if previous.initializer is not None or (previous.type_name and symbol.initializer is None):
                 continue
         declarations.data[name] = symbol
-    for member in program.fields:
-        previous = declarations.field_types.setdefault(member.name, member.type_name)
-        if previous != member.type_name:
-            raise ExxError(member.line, f"conflicting field type for {member.name}")
-    for layout in program.layouts:
-        if layout.name in _SCALAR_WIDTHS or layout.size == 0:
-            raise ExxError(layout.line, "a layout requires a non-scalar name and a positive byte size")
-        previous = declarations.layout_sizes.setdefault(layout.name, layout.size)
-        if previous != layout.size:
-            raise ExxError(layout.line, f"conflicting layout size for {layout.name}")
     for proc in program.procs:
         if proc.name in declarations.data:
             raise ExxError(proc.line, f"{proc.name} is declared as data")
+        if proc.name in declarations.layouts.definitions:
+            raise ExxError(proc.line, f"{proc.name} is declared as a struct")
         if interface and proc.body is not None:
-            raise ExxError(proc.line, "a shared ABI file may only contain extern, field and layout declarations")
+            raise ExxError(proc.line, "a shared ABI file may only contain extern, struct, layout and field declarations")
         if proc.name.lower().startswith("exx__"):
             raise ExxError(proc.line, "the exx__ prefix is reserved for generated labels")
         validate_group(cpu, (p.register for p in proc.params if p.register is not None), proc.line)
@@ -335,18 +339,10 @@ class Lowering:
         return self.member_operand(reg, layout, path[::-1], expr.line)
 
     def member_operand(self, reg, layout, path, line, *, prefix=()):
-        offsets = list(prefix)
-        for member in path[:-1]:
-            name = f"{layout}.{member}"
-            layout = self.declarations.field_types.get(name)
-            if layout is None or layout in _SCALAR_WIDTHS:
-                raise ExxError(line, f"{name} requires a nested layout declaration")
-            offsets.append(name)
-        member = path[-1]
-        type_name = self.declarations.field_types.get(f"{layout}.{member}", "u8")
+        type_name, offsets = self.declarations.layouts.member_path(layout, path, line)
         if type_name not in _SCALAR_WIDTHS:
-            raise ExxError(line, f"{layout}.{member} is a nested layout; select a member")
-        return self.cpu.field_operand(reg, layout, member, _SCALAR_WIDTHS[type_name], prefix=offsets)
+            raise ExxError(line, f"{'.'.join((layout, *path))} is a nested layout; select a member")
+        return self.cpu.field_operand(reg, (*prefix, *offsets), _SCALAR_WIDTHS[type_name])
 
     def stack_operand(self, param, path, line):
         frame = self.proc.frame
@@ -359,7 +355,7 @@ class Lowering:
             raise ExxError(line, f"select a member of stack parameter {param.name}")
         displacement = self.cpu.frame_displacement(param.stack_offset, 1)
         if path:
-            operand = self.member_operand(frame, param.type_name, path, line, prefix=(str(displacement),))
+            operand = self.member_operand(frame, param.type_name, path, line, prefix=(displacement,))
         else:
             address = self.cpu.indirect_operand(self.cpu.register(frame), Operand("imm", str(displacement)))
             operand = replace(address, width=width)
@@ -383,7 +379,10 @@ class Lowering:
                     raise ExxError(expr.line, f"declare a type for data {expr.value} to access its value")
                 address = self.declarations.data_address(expr, self.externals)
                 return self.cpu.absolute_operand(address, _SCALAR_WIDTHS[declaration.type_name])
-            # Constants and assembler structure offsets remain symbolic.
+            offset = self.declarations.layout_constant(expr.value, expr.line)
+            if offset is not None:
+                return offset
+            # External constants and assembler structure offsets remain symbolic.
             if name.isupper():
                 return Operand("imm", expr.value)
             raise ExxError(expr.line, f"unknown name {expr.value}")
@@ -760,18 +759,30 @@ class Lowering:
 def compile_source(source: str, *, platform=None, interfaces=()) -> CompiledModule:
     cpu = platforms.create(platform)
     declared = Declarations()
+    parsed_interfaces = []
     for path, declarations in interfaces:
         try:
-            collect_signatures(cpu, parse(declarations), declared, interface=True)
+            parsed_interfaces.append((path, parse(declarations)))
         except ExxError as error:
             error.source = path
             raise
     comments = []
     program = parse(source, comments=comments)
+    for path, unit in parsed_interfaces:
+        declared.layouts.collect(unit, path)
+    declared.layouts.collect(program, None)
+    declared.layouts.resolve()
+    for path, unit in parsed_interfaces:
+        try:
+            collect_signatures(cpu, unit, declared, interface=True)
+        except ExxError as error:
+            error.source = path
+            raise
     collect_signatures(cpu, program, declared)
     data = tuple(lower_data(symbol, declared, cpu) for symbol in program.data if symbol.initializer is not None)
     module = CompiledModule((Lowering(declared.procedures[proc.name], declared, cpu).finish() for proc in program.procs
-                             if proc.body is not None), comments, program.assembly, data)
+                             if proc.body is not None), comments, program.assembly, data,
+                            tuple(declared.layouts.definitions.values()))
     layout = getattr(cpu, "layout_module", None)
     if layout is not None:
         layout(module)

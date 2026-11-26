@@ -5,6 +5,7 @@ from dataclasses import replace
 from typing import Callable
 
 from ..ir import Instruction, Operand, TargetError, Transfer
+from ..layouts import offset_expression
 from ..registry import platforms
 from .z80_branches import relax_branches
 
@@ -94,10 +95,14 @@ def supports_layout(reg: str) -> bool:
     return reg in INDEX_REGISTERS
 
 
-def field_operand(reg: str, layout: str, field: str, width: int = 8, *, prefix=()) -> Operand:
+def field_operand(reg: str, offsets, width: int = 8) -> Operand:
     if not supports_layout(reg):
         raise TargetError(f"{reg} cannot address a structure field on Z80")
-    return Operand("mem", " + ".join((reg, *prefix, f"{layout}.{field}")), width)
+    displacement = offset_expression(offsets)
+    numeric = _literal(displacement)
+    if numeric is not None and numeric + width // 8 - 1 > 127:
+        raise TargetError(f"invalid Z80 index displacement for {width // 8}-byte field at +{numeric}")
+    return Operand("mem", f"{reg} + {displacement}", width)
 
 
 def indirect_operand(base, offset=None):

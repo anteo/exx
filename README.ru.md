@@ -43,6 +43,9 @@ minimum:
 
 Обе процедуры курсора теперь можно подключить одним файлом. [Полученный cursor.asm](tests/golden/asm/sdk_console_cursor.asm)
 
+Таргет `sjasmplus` добавляет в вывод нативные объявления `STRUCT … ENDS`.
+Общий `asm` подставляет числовые смещения в инструкции EXX.
+
 ### Модуль для линковки
 
 Таргет `z80asm` оформляет те же инструкции директивами `SECTION`, `PUBLIC` и `EXTERN` для
@@ -84,6 +87,22 @@ z88dk-z80asm cursor.asm
 ```asm
     INCLUDE "layout.inc"
 ```
+
+### Подключение структур в ASM
+
+Опишите структуры через `struct` в `layout.abi`. Передавайте этот файл через
+`--abi layout.abi` при трансляции EXX. Для ASM сгенерируйте подключаемый файл.
+
+```sh
+./exx --target sjasmplus --layouts-only layout.abi -o layout.sjasm.inc
+./exx --target z80asm --layouts-only layout.abi -o layout.z80asm.inc
+```
+
+В ASM подключите файл своего ассемблера. В sjasmplus сгенерированные структуры
+можно использовать для создания экземпляров и обращения к полям вроде
+`CELL.surface.page1`. В z88dk-z80asm доступны смещения вроде
+`CELL_surface_page1` и размер `CELL`. Например, `defs CELL` выделяет память
+под экземпляр.
 
 ### Общие объявления ABI
 

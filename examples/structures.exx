@@ -1,0 +1,29 @@
+struct CELL {
+    mode: u8
+    surface: DRAW_SURFACE
+}
+
+struct DRAW_SURFACE {
+    page0: u8
+    page1: u8
+}
+
+layout {
+    EXTERNAL_CELL: 5 {
+        address: u16
+    }
+}
+
+field {
+    EXTERNAL_CELL {
+        surface: DRAW_SURFACE
+    }
+}
+
+A read_page(cell: CELL) frame(IX) clobbers(CF, HF, N) {
+    return cell.surface.page1
+}
+
+A read_external_page(cell: EXTERNAL_CELL → IY) {
+    return cell->surface.page1
+}

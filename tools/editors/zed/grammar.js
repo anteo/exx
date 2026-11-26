@@ -14,7 +14,8 @@ module.exports = grammar({
 
   rules: {
     source_file: $ => repeat(choice($.procedure, $.external_procedure,
-      $.data_declaration, $.field_declaration, $.layout_declaration, $.assembly, ';')),
+      $.data_declaration, $.field_declaration, $.layout_declaration, $.struct_declaration,
+      $.assembly, ';')),
 
     procedure: $ => seq($._signature, optional($.frame), optional($.clobbers), $.block),
     external_procedure: $ => seq('extern', $._signature, optional($.clobbers)),
@@ -40,8 +41,15 @@ module.exports = grammar({
       seq('data', field('name', $.identifier), $._type_annotation, '=', $._expression),
       seq('extern', 'data', field('name', $.identifier), optional($._type_annotation)),
     ),
-    field_declaration: $ => seq('field', $.qualified_name, $._type_annotation),
-    layout_declaration: $ => seq('layout', $.type_name, ':', $.number),
+    field_declaration: $ => seq('field', choice($._field_entry,
+      seq('{', repeat(choice($._field_entry, ',', ';')), '}'))),
+    _field_entry: $ => choice(seq($.qualified_name, $._type_annotation), seq($.type_name, $.record_fields)),
+    layout_declaration: $ => seq('layout', choice($._layout_entry,
+      seq('{', repeat(choice($._layout_entry, ',', ';')), '}'))),
+    _layout_entry: $ => seq($.type_name, ':', $.number, optional($.record_fields)),
+    struct_declaration: $ => seq('struct', $.type_name, $.record_fields),
+    record_fields: $ => seq('{', repeat(choice($.member_declaration, ',', ';')), '}'),
+    member_declaration: $ => seq(field('name', $.identifier), $._type_annotation),
     qualified_name: $ => seq($.identifier, repeat1(seq('.', $.identifier))),
 
     block: $ => seq('{', repeat(choice($._statement, ';')), '}'),

@@ -46,6 +46,7 @@ def assemble(example: Path, target: str, assembler: str, directory: Path) -> byt
         "bit_operations": {"PACKET.status": 0, "PACKET.flags": 1},
         "buffer": {"DRV_HEADER.ops": 6, "DUO_TSCONF": 1},
         "stack_arguments": {"DRAW_SURFACE.page0": 1},
+        "structures": {"EXTERNAL_CELL.surface": 3},
     }.get(example.stem, {})
     helpers = VIDEO_HELPERS if example.stem == "video_plan_plane" else ()
     data = ("bs_storage_ops", "ts_storage_ops") if example.stem == "buffer" else ()
@@ -54,7 +55,7 @@ def assemble(example: Path, target: str, assembler: str, directory: Path) -> byt
         str(example), "-o", "generated.asm",
     ]
     if constants:
-        if target == "asm":
+        if target != "z80asm":
             definitions = [f"{name} equ {value}" for name, value in constants.items()]
         else:
             definitions = [
@@ -68,7 +69,7 @@ def assemble(example: Path, target: str, assembler: str, directory: Path) -> byt
     # Fixed-size stubs supply deterministic external addresses to both assemblers.
     stub_code = "".join(f"{name}:\n    ret\n" for name in helpers)
     stub_code += "".join(f"{name}:\n    defb 0\n" for name in data)
-    if target == "asm":
+    if target != "z80asm":
         wrapper = f'    ORG {ORIGIN}\n    INCLUDE "generated.asm"\n{stub_code}'
         (directory / "wrapper.asm").write_text(wrapper, encoding="ascii")
         run([assembler, "--nologo", "--raw=example.bin", "wrapper.asm"], directory)
@@ -148,6 +149,38 @@ def assemble_shared_abi(directory: Path, sjasmplus: str, z80asm: str) -> None:
     print("shared ABI: separately compiled caller and provider linked to the expected 5 bytes")
 
 
+def assemble_shared_structures(directory: Path, sjasmplus: str, z80asm: str) -> None:
+    directory.mkdir()
+    (directory / "layout.abi").write_text(
+        "struct CELL { mode: u8, surface: SURFACE }\n"
+        "struct SURFACE { page0: u8, page1: u8 }\n", encoding="utf-8")
+    (directory / "provider.exx").write_text(
+        "A provider(cell: CELL → IX) { return cell->surface.page1 }\n", encoding="utf-8")
+    for target, assembler in (("sjasmplus", sjasmplus), ("z80asm", z80asm)):
+        (directory / target).mkdir()
+        module = directory / target
+        cli = [sys.executable, str(ROOT / "exx"), "--target", target]
+        run([*cli, "--layouts-only", "../layout.abi", "-o", "layout.inc"], module)
+        run([*cli, "--abi", "../layout.abi", "../provider.exx", "-o", "provider.asm"], module)
+        if target == "sjasmplus":
+            assembly = (
+                f'    ORG {ORIGIN}\n    INCLUDE "layout.inc"\n    INCLUDE "provider.asm"\n'
+                "instance CELL\n    ld a,CELL.surface.page1\n    ld bc,CELL\n"
+            )
+            command = [assembler, "--nologo", "--raw=example.bin", "consumer.asm"]
+        else:
+            assembly = (
+                '    SECTION code_user\n    INCLUDE "layout.inc"\n    INCLUDE "layout.inc"\n'
+                "instance:\n    defs CELL,0\n    ld a,CELL_surface_page1\n    ld bc,CELL\n"
+            )
+            command = [assembler, "-b", f"-r={ORIGIN}", "-o=example.bin", "provider.asm", "consumer.asm"]
+        (module / "consumer.asm").write_text(assembly, encoding="ascii")
+        run(command, module)
+        if (module / "example.bin").read_bytes() != bytes.fromhex("dd 7e 02 c9 00 00 00 3e 02 01 03 00"):
+            raise RuntimeError(f"{target}: incorrect shared structure size or member offset")
+    print("shared structures: both assemblers consumed generated layout includes")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sjasmplus", default=os.environ.get("SJASMPLUS", "sjasmplus"))
@@ -161,7 +194,7 @@ def main() -> int:
         with TemporaryDirectory(prefix="exx-assemble-") as scratch:
             for example in examples:
                 binary = assemble(
-                    example, "asm", args.sjasmplus, Path(scratch) / f"{example.stem}-sj",
+                    example, "sjasmplus", args.sjasmplus, Path(scratch) / f"{example.stem}-sj",
                 )
                 linked = assemble(
                     example, "z80asm", args.z80asm, Path(scratch) / f"{example.stem}-z80asm",
@@ -179,6 +212,7 @@ def main() -> int:
                     )
                 print(f"{example.name}: both assemblers produced the same {len(binary)} bytes")
             assemble_shared_abi(Path(scratch) / "shared", args.sjasmplus, args.z80asm)
+            assemble_shared_structures(Path(scratch) / "structures-shared", args.sjasmplus, args.z80asm)
             assemble_branch_limits(Path(scratch) / "branches", args.sjasmplus, args.z80asm)
             assemble_long_repeat(Path(scratch) / "long", args.sjasmplus, args.z80asm)
             assemble_field_address(Path(scratch) / "word", args.sjasmplus, args.z80asm)

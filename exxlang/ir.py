@@ -25,6 +25,21 @@ class StaticData:
 
 
 @dataclass(frozen=True)
+class StructMember:
+    name: str
+    type_name: str
+    size: int
+    offset: int
+
+
+@dataclass(frozen=True)
+class StructDefinition:
+    name: str
+    size: int
+    members: tuple[StructMember, ...]
+
+
+@dataclass(frozen=True)
 class Transfer:
     """Ordered storage cells for a stack operation or simultaneous exchange."""
 

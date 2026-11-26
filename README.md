@@ -42,6 +42,9 @@ are tested with sjasmplus, which includes the fragment with `INCLUDE "cursor.asm
 
 The two cursor routines can now be included together. [Generated cursor.asm](tests/golden/asm/sdk_console_cursor.asm)
 
+Use `--target sjasmplus` to include native `STRUCT … ENDS` declarations in
+the fragment. Use `asm` for portable output with numeric structure offsets.
+
 ### Linkable assembly module
 
 The `z80asm` target emits the same instructions with `SECTION`, `PUBLIC` and `EXTERN` for
@@ -83,6 +86,21 @@ Use `--include` to place layout and constant definitions before the generated pr
 ```asm
     INCLUDE "layout.inc"
 ```
+
+### Sharing structures with ASM
+
+Define the records with `struct` in `layout.abi`. Pass that file as
+`--abi layout.abi` to each EXX translation and generate an include for ASM.
+
+```sh
+./exx --target sjasmplus --layouts-only layout.abi -o layout.sjasm.inc
+./exx --target z80asm --layouts-only layout.abi -o layout.z80asm.inc
+```
+
+In ASM, include the file for your assembler. sjasmplus can use the generated
+structures to declare instances and access members such as `CELL.surface.page1`.
+z88dk-z80asm gets the corresponding offsets such as `CELL_surface_page1` and
+the size `CELL`, which can be used to reserve storage with `defs CELL`.
 
 ### Shared interfaces
 

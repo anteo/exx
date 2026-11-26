@@ -47,7 +47,7 @@ The arguments already occupy B and IX. The call and the error check compile to
 
 ### Source comments
 
-Both targets copy `//` and `/* … */` comments into the assembly as semicolon-prefixed lines.
+All targets copy `//` and `/* … */` comments into the assembly as semicolon-prefixed lines.
 Procedure descriptions appear above their labels. A comment on a statement that emits no
 code stays in source order alongside the remaining instructions.
 
@@ -201,6 +201,87 @@ read_page:
     pop ix
     ret
 ```
+
+### Grouped layouts
+
+Use `layout { … }` to declare several ASM-owned sizes. A size declaration
+can include the types of the fields used by EXX. The assembler still supplies
+each field's byte offset. This example makes `address` a word at the existing
+symbol `EXTERNAL_CELL.address`.
+
+```text
+layout {
+    EXTERNAL_CELL: 5 { address: u16 }
+    DRAW_SURFACE: 3
+}
+
+HL read_address(cell: EXTERNAL_CELL → IY) { return cell->address }
+```
+
+```asm
+read_address:
+    ld l, (iy + EXTERNAL_CELL.address)
+    ld h, (iy + EXTERNAL_CELL.address + 1)
+    ret
+```
+
+### Grouped field types
+
+`field LAYOUT { … }` describes several members without repeating the layout
+name. An outer `field { … }` accepts both grouped and qualified entries.
+A field of a structure type provides the type for the next step of a member
+path. Newlines, commas or semicolons separate entries in declaration blocks.
+
+```text
+field {
+    VID_SESSION { candidate: DRAW_SURFACE }
+    DRAW_SURFACE.page0: u8
+}
+
+A read_page(session: VID_SESSION → IX) { return session->candidate.page0 }
+```
+
+```asm
+read_page:
+    ld a, (ix + VID_SESSION.candidate + DRAW_SURFACE.page0)
+    ret
+```
+
+### EXX structures
+
+`struct` lays out `u8`, little-endian `u16` and other sized types in declaration
+order without padding. A sized ASM-owned layout can be embedded as an opaque
+field. The name of an EXX structure is its size, and paths such as
+`DRAW_SURFACE.page0` are its field offsets in constant expressions.
+
+```text
+struct DRAW_SURFACE {
+    mode: u8
+    page0: u8
+    page1: u8
+}
+
+A read_first_page(surface: DRAW_SURFACE → IX) { return surface->page0 }
+```
+
+Output for `sjasmplus`, with the generated include guard omitted from the listing.
+
+```asm
+    STRUCT @DRAW_SURFACE
+mode BYTE
+page0 BYTE
+page1 BYTE
+    ENDS
+
+read_first_page:
+    ld a, (ix + 1)
+    ret
+```
+
+`z80asm` emits a `DEFVARS` block for the members and a `DEFC` for the size.
+Use dotted field names in sjasmplus and underscore-separated names in
+z88dk-z80asm. For the portable `asm` target, EXX uses numeric offsets in its
+own instructions. See [sharing structures with ASM](README.md#sharing-structures-with-asm).
 
 ### Local register aliases
 
@@ -1326,7 +1407,7 @@ otir(C, HL, B)
 ### File-scope assembly
 
 Use `asm { … }` to place tables, labels, macros or assembler directives between EXX procedures.
-Both targets emit the body in source order after the generated module header. Indentation, symbol
+All targets emit the body in source order after the generated module header. Indentation, symbol
 spelling and comments inside the body pass through to the selected assembler. Write conditional
 assembly in its native dialect. EXX provides no separate `#define` or `#ifdef` preprocessor.
 
