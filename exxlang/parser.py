@@ -155,6 +155,9 @@ class _Parser:
 
     def _block(self) -> tuple[Stmt, ...]:
         self._expect("{")
+        return self._block_contents()
+
+    def _block_contents(self) -> tuple[Stmt, ...]:
         statements = []
         self._skip_separators()
         while self.token.value != "}":
@@ -185,6 +188,10 @@ class _Parser:
             self._expect_statement_end()
             return Stmt("return", token.line, result)
         target = self._expression()
+        if target.kind == "call" and target.value == "keep" and self._accept_after_newlines("{"):
+            if not target.args or any(arg.kind != "name" for arg in target.args):
+                raise ExxError(token.line, "keep requires register pairs or their aliases")
+            return Stmt("keep", token.line, target, body=self._block_contents())
         if self._accept("→"):
             aliases = self._binding_names(target)
             registers = self._names() if self.token.value == "(" else (self._expect_name().value,)

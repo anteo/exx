@@ -520,6 +520,39 @@ A = VID_CTX.slot0 ^ VID_CTX.slot1
 
 ## Stack and register banks
 
+### Scoped register saves
+
+`keep` pushes register pairs in list order and pops them in reverse order. Aliases are valid here.
+This copy preserves both pointers, the count and AF, using eight bytes of stack.
+
+```text
+copy_bytes(source → HL, destination → DE, count → BC) {
+    keep(AF, source, destination, count) {
+        ldir(destination, source, count)
+    }
+}
+```
+
+```asm
+copy_bytes:
+    push af
+    push hl
+    push de
+    push bc
+    ldir
+    pop bc
+    pop de
+    pop hl
+    pop af
+    ret
+```
+
+Nested blocks restore from the inside out. An early `return` restores all active saves. A `break`
+restores only the blocks it leaves. Conditions use the flags at the branch, before restoration.
+EXX reports an error if it cannot prove that restoring a pair preserves a live result or a tail-call
+argument. For example, when returning A, place `return 5` after `keep(AF)` to return the new value.
+Manual pushes and pops inside the block must balance above its saved words.
+
 ### Stack saves
 
 `push` saves a word and `pop` restores it into the chosen pair. EXX tracks which parts were

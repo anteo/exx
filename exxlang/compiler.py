@@ -29,6 +29,9 @@ class Step:
     instruction: Instruction
     line: int
     kills: frozenset = frozenset()
+    # A generated push and all matching pops share the push step's index.
+    keep_slot: int | None = None
+    keep_live: frozenset = frozenset()
 
 
 def parts(cpu, names):
@@ -117,6 +120,7 @@ class Lowering:
         self.externals = set()
         self.counter = 0
         self.loop_exits = []
+        self.kept_words = []
         self.writable = parts(cpu, proc.outputs + proc.clobbers)
 
     def label(self):
@@ -285,6 +289,8 @@ class Lowering:
         if callee.body is None:
             self.externals.add(callee.name)
         reads = parts(self.cpu, (p.register for p in callee.params))
+        if tail:
+            self.restore_kept(0, expr.line, reads)
         self.emit(self.cpu.call(callee.name, reads, parts(self.cpu, callee.outputs), tail),
                   expr.line, parts(self.cpu, callee.clobbers))
 
@@ -326,6 +332,12 @@ class Lowering:
         if stmt.value and stmt.value.kind == "call":
             self.call(stmt.value, tail=True)
             return
+        self.prepare_results(stmt)
+        outputs = parts(self.cpu, self.proc.outputs)
+        self.restore_kept(0, stmt.line, outputs)
+        self.emit(self.cpu.ret(outputs), stmt.line)
+
+    def prepare_results(self, stmt):
         values = elements(stmt.value)
         if len(values) != len(self.proc.outputs):
             raise ExxError(stmt.line, f"expected {len(self.proc.outputs)} return values")
@@ -334,7 +346,6 @@ class Lowering:
         code = self.cpu.constant_return(self.proc.outputs, sources, self.writable)
         if code is not None:
             self.target_code(code, stmt.line)
-            self.emit(self.cpu.ret(parts(self.cpu, self.proc.outputs)), stmt.line)
             return
         # Evaluate tuple sources in their original locations. Keep later
         # operands and every previously established result live during moves.
@@ -360,7 +371,23 @@ class Lowering:
                     break
             else:
                 raise ExxError(stmt.line, "return values overlap; prepare result registers explicitly")
-        self.emit(self.cpu.ret(parts(self.cpu, self.proc.outputs)), stmt.line)
+
+    def keep(self, stmt):
+        depth = len(self.kept_words)
+        for arg in stmt.value.args:
+            reg = self.operand(arg)
+            ins, = self.cpu.update_intrinsic("push", (reg,))
+            slot = len(self.steps)
+            self.steps.append(Step(ins, arg.line, keep_slot=slot))
+            self.kept_words.append((slot, reg))
+        self.block(stmt.body)
+        self.restore_kept(depth, stmt.line)
+        del self.kept_words[depth:]
+
+    def restore_kept(self, depth, line, live=frozenset()):
+        for slot, reg in reversed(self.kept_words[depth:]):
+            ins, = self.cpu.update_intrinsic("pop", (reg,))
+            self.steps.append(Step(ins, line, keep_slot=slot, keep_live=live & self.cpu.resources(reg.text)))
 
     def block(self, statements):
         outer = self.aliases
@@ -384,10 +411,13 @@ class Lowering:
             self.call(stmt.value)
         elif stmt.kind == "return":
             self.returns(stmt)
+        elif stmt.kind == "keep":
+            self.keep(stmt)
         elif stmt.kind == "if":
-            if (self.loop_exits and not stmt.otherwise and len(stmt.body) == 1
+            if (self.loop_exits and self.loop_exits[-1][1] == len(self.kept_words)
+                    and not stmt.otherwise and len(stmt.body) == 1
                     and stmt.body[0].kind == "break"):
-                self.condition(stmt.value, self.loop_exits[-1], True)
+                self.condition(stmt.value, self.loop_exits[-1][0], True)
                 return
             end = self.label()
             alt = self.label() if stmt.otherwise else end
@@ -401,7 +431,8 @@ class Lowering:
         elif stmt.kind == "break":
             if not self.loop_exits:
                 raise ExxError(stmt.line, "break requires an enclosing loop")
-            end = self.loop_exits[-1]
+            end, depth = self.loop_exits[-1]
+            self.restore_kept(depth, stmt.line)
             self.emit(self.cpu.jump(end), stmt.line)
         elif stmt.kind in ("while", "repeat"):
             start, end = self.label(), self.label()
@@ -411,7 +442,7 @@ class Lowering:
                 back_edge = self.cpu.jump(start)
             else:
                 back_edge = self.cpu.repeat_branch(self.operand(stmt.value), start)
-            self.loop_exits.append(end)
+            self.loop_exits.append((end, len(self.kept_words)))
             self.block(stmt.body)
             self.loop_exits.pop()
             self.emit(back_edge, stmt.line)

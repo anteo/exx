@@ -1,15 +1,9 @@
 // Copy count bytes, preserving the caller's pointers, count and flags.
 // As with LDIR, a zero count copies 65536 bytes.
 copy_bytes(source → HL, destination → DE, count → BC) {
-    push(AF)
-    push(source)
-    push(destination)
-    push(count)
-    ldir(destination, source, count)
-    pop(count)
-    pop(destination)
-    pop(source)
-    pop(AF)
+    keep(AF, source, destination, count) {
+        ldir(destination, source, count)
+    }
 }
 
 // Install a new pointer in the alternate HL, preserving the active bank.
