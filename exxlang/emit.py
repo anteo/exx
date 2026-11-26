@@ -8,6 +8,9 @@ from .registry import targets
 from .syntax import AsmBlock
 
 
+DEFAULT_INDENT = 4
+
+
 def _asm_lines(text):
     lines = text.split("\n")
     if len(lines) > 1:
@@ -22,6 +25,7 @@ def _asm_lines(text):
 class Assembler:
     name: str
     platforms: tuple[str, ...]
+    indent = " " * DEFAULT_INDENT
 
     def header(self, procedures, section):
         return []
@@ -35,7 +39,10 @@ class Assembler:
     def constant(self, name, value):
         return f"{name} EQU {value}"
 
-    def emit(self, procedures, section, includes, *, layouts_only=False):
+    def emit(self, procedures, section, includes, *, layouts_only=False, indent=DEFAULT_INDENT):
+        if indent < 1:
+            raise ValueError("--indent expects a positive number of spaces")
+        self.indent = padding = " " * indent
         comments = deque(getattr(procedures, "comments", ()))
         assembly = getattr(procedures, "assembly", ())
         data = getattr(procedures, "data", ())
@@ -55,7 +62,7 @@ class Assembler:
         for path in includes:
             if not path or any(char in path for char in '"\r\n\0'):
                 raise ValueError(f"invalid assembler include path {path!r}")
-            lines.append(f'    INCLUDE "{path}"')
+            lines.append(f'{padding}INCLUDE "{path}"')
         if not layouts_only:
             lines.extend(self.header(procedures, section))
         structure_lines = self.structure_lines(structures)
@@ -72,18 +79,18 @@ class Assembler:
                 continue
             if isinstance(item, Directive):
                 value = self.operands((item.value,))
-                lines.append(self.constant(item.name, value) if item.name else f"    ORG {value}")
+                lines.append(self.constant(item.name, value) if item.name else f"{padding}ORG {value}")
                 continue
             if isinstance(item, StaticData):
                 directive = {8: "defb", 16: "defw"}[item.width]
-                lines.extend((f"{item.name}:", f"    {directive} {self.operands((item.initializer,))}"))
+                lines.extend((f"{item.name}:", f"{padding}{directive} {self.operands((item.initializer,))}"))
                 continue
             procedure = item
             if procedure.platform not in self.platforms:
                 raise ValueError(f"{self.name} cannot emit {procedure.platform} instructions")
             lines.append(f"{procedure.name}:")
             for ins in procedure.instructions:
-                emit_comments(ins.source_offset, "    ")
+                emit_comments(ins.source_offset, padding)
                 if ins.mnemonic == "asm":
                     lines.extend(_asm_lines(ins.operands[0]))
                     continue
@@ -91,14 +98,14 @@ class Assembler:
                 if ins.mnemonic == "label":
                     lines.append(f"{operands}:")
                 else:
-                    lines.append(f"    {ins.mnemonic}" + (f" {operands}" if operands else ""))
-            emit_comments(procedure.end, "    ")
+                    lines.append(f"{padding}{ins.mnemonic}" + (f" {operands}" if operands else ""))
+            emit_comments(procedure.end, padding)
         emit_comments()
         return "\n".join(lines) + "\n"
 
 
-def emit(procedures, target, section="code_user", includes=()):
-    return targets.create(target).emit(procedures, section, includes)
+def emit(procedures, target, section="code_user", includes=(), *, indent=DEFAULT_INDENT):
+    return targets.create(target).emit(procedures, section, includes, indent=indent)
 
 
 def structure_guard(struct):

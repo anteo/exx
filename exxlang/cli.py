@@ -9,6 +9,7 @@ from tempfile import NamedTemporaryFile
 from . import __version__
 from .compiler import compile_source
 from .diagnostics import ExxError
+from .emit import DEFAULT_INDENT
 from .registry import platforms, targets
 
 
@@ -38,6 +39,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--layouts-only", action="store_true", help="emit an assembly include of struct declarations")
     parser.add_argument("-o", "--output", type=Path, help="output file (default: stdout)")
     parser.add_argument("--section", default="code_user", help="section for z80asm output")
+    parser.add_argument("--indent", type=int, default=DEFAULT_INDENT, metavar="N",
+                        help="spaces per generated assembly indentation level (default: %(default)s)")
     parser.add_argument("--include", action="append", default=[], metavar="PATH",
                         help="assembler include to place before generated procedures")
     args = parser.parse_args(argv)
@@ -50,10 +53,8 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError(f"{target.name} does not support platform {platform}")
         interfaces = [(path, path.read_text(encoding="utf-8")) for path in args.abi]
         procedures = compile_source(source, platform=platform, interfaces=interfaces)
-        if args.layouts_only:
-            assembly = target.emit(procedures, args.section, args.include, layouts_only=True)
-        else:
-            assembly = target.emit(procedures, args.section, args.include)
+        assembly = target.emit(procedures, args.section, args.include,
+                               layouts_only=args.layouts_only, indent=args.indent)
         if args.output is None:
             sys.stdout.write(assembly)
         else:

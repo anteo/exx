@@ -64,6 +64,15 @@ The generated module begins with these directives.
     PUBLIC zx__console_advance
 ```
 
+### Assembly indentation
+
+`--indent N` sets the number of spaces per level in generated ASM. The default
+is four. Code inside `asm { … }` keeps its original indentation.
+
+```sh
+./exx --target z80asm --indent 8 examples/sdk_console_cursor.exx -o cursor.asm
+```
+
 ### CPU selection
 
 Use `--platform` to select the CPU. By default EXX uses the first platform supported by the

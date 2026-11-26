@@ -65,6 +65,16 @@ z88dk-z80asm cursor.asm
     PUBLIC zx__console_advance
 ```
 
+### Отступы в ASM
+
+`--indent N` задаёт число пробелов на уровень в сгенерированном ASM.
+По умолчанию используются четыре пробела. Вставки `asm { … }` сохраняют
+исходные отступы.
+
+```sh
+./exx --target z80asm --indent 8 examples/sdk_console_cursor.exx -o cursor.asm
+```
+
 ### Выбор процессора
 
 Процессор задаётся через `--platform`. По умолчанию EXX выбирает первую платформу таргета. Без
