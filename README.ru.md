@@ -600,6 +600,28 @@ install:
     ret
 ```
 
+### Вложенные поля структур
+
+Объявите вложенное поле с именем его раскладки и обращайтесь к его членам
+через точку после первого поля. EXX складывает ассемблерные смещения
+и берёт размер из типа конечного поля.
+
+```text
+field VID_SESSION.candidate: VID_SURFACE
+field VID_SURFACE.mode: u16
+
+set_mode(session: VID_SESSION → IX, mode → HL) {
+    session->candidate.mode = mode
+}
+```
+
+```asm
+set_mode:
+    ld (ix + VID_SESSION.candidate + VID_SURFACE.mode), l
+    ld (ix + VID_SESSION.candidate + VID_SURFACE.mode + 1), h
+    ret
+```
+
 ### Адреса внешних данных
 
 Объявите символ данных через `extern data` и возьмите его адрес оператором `&`. Таргет `z80asm`

@@ -591,6 +591,28 @@ install:
     ret
 ```
 
+### Embedded structure fields
+
+Declare an embedded field with its layout name and select its members with
+a dot after the first field. EXX adds the assembler offsets along the path
+and uses the size of the final field.
+
+```text
+field VID_SESSION.candidate: VID_SURFACE
+field VID_SURFACE.mode: u16
+
+set_mode(session: VID_SESSION → IX, mode → HL) {
+    session->candidate.mode = mode
+}
+```
+
+```asm
+set_mode:
+    ld (ix + VID_SESSION.candidate + VID_SURFACE.mode), l
+    ld (ix + VID_SESSION.candidate + VID_SURFACE.mode + 1), h
+    ret
+```
+
 ### External data addresses
 
 Declare an assembly data symbol with `extern data` and take its address with `&`. The `z80asm`

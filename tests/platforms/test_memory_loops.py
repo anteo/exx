@@ -45,8 +45,29 @@ class MemoryTests(unittest.TestCase):
             with self.subTest(statement=statement), self.assertRaises(ExxError):
                 instructions(prefix + f"f(ctx: CTX → IX, v → DE) clobbers(IX, A, HL) {{ {statement} }}")
 
+    def test_nested_fields_use_the_leaf_type_and_sum_offsets(self):
+        abi = [("layout.abi", "field ROOT.sub: NESTED\nfield NESTED.entry: ENTRY\nfield ENTRY.mode: u16")]
+        src = "f(ctx: ROOT → IX, word → HL) → HL {ctx->sub.entry.mode = word; return ctx->sub.entry.mode}"
+        proc, = compile_source(src, interfaces=abi)
+        for target, separator in (("asm", "."), ("z80asm", "_")):
+            with self.subTest(target=target):
+                offset = " + ".join(name.replace(".", separator) for name in
+                                    ("ROOT.sub", "NESTED.entry", "ENTRY.mode"))
+                output = emit([proc], target)
+                self.assertIn(f"    ld (ix + {offset}), l\n    ld (ix + {offset} + 1), h\n", output)
+                self.assertIn(f"    ld l, (ix + {offset})\n    ld h, (ix + {offset} + 1)\n", output)
+
+    def test_nested_access_requires_an_embedded_layout(self):
+        source = "f(ctx: ROOT → IY) → A { return ctx->sub.entry }"
+        for prefix in ("", "field ROOT.sub: u16\n"):
+            with self.subTest(prefix=prefix), self.assertRaisesRegex(ExxError, "requires a nested layout"):
+                instructions(prefix + source)
+        with self.assertRaisesRegex(ExxError, "select a member"):
+            instructions("field ROOT.sub: ENTRY\nf(ctx: ROOT → IY) → A { return ctx->sub }")
+
     def test_interface_conflicts(self):
-        for decl in ("field CTX.ptr: u8", "extern data handler", "extern data ix", "extern data exx__reserved"):
+        for decl in ("field CTX.ptr: u8", "field CTX.ptr: OTHER", "extern data handler",
+                     "extern data ix", "extern data exx__reserved"):
             with self.subTest(decl=decl), self.assertRaises(ExxError):
                 compile_source(decl, interfaces=[("defs.abi", "extern handler()\nfield CTX.ptr: u16")])
 

@@ -99,10 +99,7 @@ class _Parser:
                 if "." not in name:
                     raise ExxError(line, "field declaration requires Layout.member")
                 self._expect(":")
-                kind = self._expect_name().value
-                if kind not in ("u8", "u16"):
-                    raise ExxError(line, "field type must be u8 or u16")
-                fields.append(Field(name, 8 if kind == "u8" else 16, line))
+                fields.append(Field(name, self._qualified_name(), line))
                 self._expect_statement_end()
             elif not is_extern and self.token.value == "asm":
                 assembly.append(self._assembly(file_scope=True))
@@ -309,9 +306,12 @@ class _Parser:
             if self._accept("("):
                 return Expr("call", name, self._list_tail(), token.line)
             value = Expr("name", name, (), token.line)
-            while self._accept("->"):
-                field = self._expect_name()
-                value = Expr("field", field.value, (value,), field.line)
+            if self._accept("->"):
+                while True:
+                    field = self._expect_name()
+                    value = Expr("field", field.value, (value,), field.line)
+                    if not self._accept("."):
+                        break
             return value
         raise ExxError(token.line, f"expected an expression, found {self._found()}")
 

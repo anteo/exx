@@ -59,7 +59,7 @@ class Proc:
 @dataclass(frozen=True)
 class Field:
     name: str
-    width: int
+    type_name: str
     line: int
 
 

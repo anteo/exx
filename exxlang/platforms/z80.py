@@ -90,10 +90,10 @@ def supports_layout(reg: str) -> bool:
     return reg in INDEX_REGISTERS
 
 
-def field_operand(reg: str, layout: str, field: str, width: int = 8) -> Operand:
+def field_operand(reg: str, layout: str, field: str, width: int = 8, *, prefix=()) -> Operand:
     if not supports_layout(reg):
         raise TargetError(f"{reg} cannot address a structure field on Z80")
-    return Operand("mem", f"{reg} + {layout}.{field}", width)
+    return Operand("mem", " + ".join((reg, *prefix, f"{layout}.{field}")), width)
 
 
 def indirect_operand(base, offset=None):

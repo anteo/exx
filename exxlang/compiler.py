@@ -14,6 +14,7 @@ from .syntax import Stmt
 
 _BINARY = {"+": operator.add, "-": operator.sub, "^": operator.xor,
            "&": operator.and_, "|": operator.or_, "<<": operator.lshift, ">>": operator.rshift}
+_SCALAR_WIDTHS = {"u8": 8, "u16": 16}
 
 
 @dataclass
@@ -77,7 +78,7 @@ def abi_key(cpu, proc):
 class Declarations:
     procedures: dict = field(default_factory=dict)
     data: set = field(default_factory=set)
-    field_widths: dict = field(default_factory=dict)
+    field_types: dict = field(default_factory=dict)
 
 
 def collect_signatures(cpu, program, declarations, *, interface=False):
@@ -91,14 +92,14 @@ def collect_signatures(cpu, program, declarations, *, interface=False):
             raise ExxError(symbol.line, f"invalid or conflicting data symbol {name}")
         declarations.data.add(name)
     for member in program.fields:
-        previous = declarations.field_widths.setdefault(member.name, member.width)
-        if previous != member.width:
-            raise ExxError(member.line, f"conflicting field width for {member.name}")
+        previous = declarations.field_types.setdefault(member.name, member.type_name)
+        if previous != member.type_name:
+            raise ExxError(member.line, f"conflicting field type for {member.name}")
     for proc in program.procs:
         if proc.name in declarations.data:
             raise ExxError(proc.line, f"{proc.name} is declared as data")
         if interface and proc.body is not None:
-            raise ExxError(proc.line, "a shared ABI file may only contain extern declarations and field widths")
+            raise ExxError(proc.line, "a shared ABI file may only contain extern and field declarations")
         if proc.name.lower().startswith("exx__"):
             raise ExxError(proc.line, "the exx__ prefix is reserved for generated labels")
         validate_group(cpu, (p.register for p in proc.params), proc.line)
@@ -147,6 +148,29 @@ class Lowering:
     def mark(self, label, line):
         self.emit(Instruction("label", (label,)), line)
 
+    def field_operand(self, expr):
+        path = []
+        base = expr
+        while base.kind == "field":
+            path.append(base.value)
+            base, = base.args
+        reg, layout = self.aliases.get(base.value, (None, None))
+        if base.kind != "name" or layout is None:
+            raise ExxError(expr.line, "field access requires a typed " + " or ".join(self.cpu.layout_registers) + " binding")
+
+        offsets = []
+        while len(path) > 1:
+            name = f"{layout}.{path.pop()}"
+            layout = self.declarations.field_types.get(name)
+            if layout is None or layout in _SCALAR_WIDTHS:
+                raise ExxError(expr.line, f"{name} requires a nested layout declaration")
+            offsets.append(name)
+        member, = path
+        type_name = self.declarations.field_types.get(f"{layout}.{member}", "u8")
+        if type_name not in _SCALAR_WIDTHS:
+            raise ExxError(expr.line, f"{layout}.{member} is a nested layout; select a member")
+        return self.cpu.field_operand(reg, layout, member, _SCALAR_WIDTHS[type_name], prefix=offsets)
+
     def operand(self, expr, width=0):
         if expr.kind == "name":
             if expr.value in self.aliases:
@@ -167,13 +191,7 @@ class Lowering:
         if expr.kind == "int":
             return Operand("imm", str(expr.value))
         if expr.kind == "field":
-            base = expr.args[0]
-            if base.kind == "name" and base.value in self.aliases:
-                reg, layout = self.aliases[base.value]
-                if layout:
-                    bits = self.declarations.field_widths.get(f"{layout}.{expr.value}", 8)
-                    return self.cpu.field_operand(reg, layout, expr.value, bits)
-            raise ExxError(expr.line, "field access requires a typed " + " or ".join(self.cpu.layout_registers) + " binding")
+            return self.field_operand(expr)
         if expr.kind == "unary" and expr.value == "&":
             symbol, = expr.args
             if symbol.kind != "name" or symbol.value not in self.declarations.data:
