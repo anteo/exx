@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>local.anteo.exx-file-type</string>
+    <key>CFBundleName</key>
+    <string>EXX File Type</string>
+    <key>CFBundleExecutable</key>
+    <string>EXXFileType</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleVersion</key>
+    <string>3</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>local.anteo.exx-source</string>
+            <key>UTTypeDescription</key>
+            <string>EXX Source Code</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.source-code</string>
+                <string>public.utf8-plain-text</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>exx</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
+</dict>
+</plist>
