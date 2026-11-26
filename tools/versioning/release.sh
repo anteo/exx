@@ -10,6 +10,7 @@ fi
 CDPATH= cd -- "$(dirname -- "$0")/../.."
 bump_my_version=${BUMP_MY_VERSION:-bump-my-version}
 git_cliff=${GIT_CLIFF:-git-cliff}
+github_cli=${GH:-gh}
 version_file=exxlang/__init__.py
 bump_config=tools/versioning/bumpversion.toml
 changelog=CHANGELOG.md
@@ -65,6 +66,8 @@ tag="v$version"
 ref="refs/tags/$tag"
 branch=$(git symbolic-ref -q HEAD) || fail 'Run the release command from a Git branch.'
 remote=$(git remote get-url --push origin) || fail 'Configure origin before publishing a release.'
+require_tool "$github_cli" 'GitHub CLI' GH
+repository=$("$github_cli" repo view "$remote" --json url --jq .url)
 printf 'Release version %s\n' "$version"
 
 if git show-ref --verify --quiet "$ref"; then
@@ -105,4 +108,21 @@ fi
 
 git push --atomic --no-follow-tags -- "$remote" "$commit:$branch" "$ref" ||
     fail "Push failed. Retry with 'make release VERSION=$version'."
-printf 'Published %s at %s to origin\n' "$tag" "$commit"
+if published=$("$github_cli" release view "$tag" --repo "$repository" --json isDraft,url \
+    --jq 'select(.isDraft | not).url' 2>/dev/null) && [ -n "$published" ]; then
+    printf '%s\n' "$published"
+else
+    tagged_changelog=$(git show "$commit:$changelog")
+    notes=$(printf '%s\n' "$tagged_changelog" | awk -v heading="## $tag" '
+        $0 == heading { in_release = 1; next }
+        in_release && /^## / { exit }
+        in_release { print }
+    ')
+    {
+        if [ -n "$notes" ]; then
+            printf '%s\n\n' "$notes"
+        fi
+        printf '[Full changelog](%s/blob/%s/%s)\n' "$repository" "$tag" "$changelog"
+    } | "$github_cli" release create "$tag" --repo "$repository" --verify-tag --notes-file - ||
+        fail "GitHub release creation failed. Retry with 'make release VERSION=$version'."
+fi
