@@ -2,12 +2,17 @@
 
 from collections import deque
 from dataclasses import dataclass
+import operator
 
 from .diagnostics import ExxError
 from .parser import parse
 from .ir import Instruction, Operand, TargetError
 from .registry import platforms
 from .syntax import Stmt
+
+
+_BINARY = {"+": operator.add, "-": operator.sub, "^": operator.xor,
+           "&": operator.and_, "|": operator.or_, "<<": operator.lshift, ">>": operator.rshift}
 
 
 @dataclass
@@ -101,7 +106,7 @@ class Lowering:
     def mark(self, label, line):
         self.emit(Instruction("label", (label,)), line)
 
-    def operand(self, expr):
+    def operand(self, expr, width=0):
         if expr.kind == "name":
             if expr.value in self.aliases:
                 return self.cpu.register(self.aliases[expr.value][0])
@@ -125,31 +130,42 @@ class Lowering:
                 if layout:
                     return self.cpu.field_operand(reg, layout, expr.value)
             raise ExxError(expr.line, "field access requires a typed " + " or ".join(self.cpu.layout_registers) + " binding")
-        if expr.kind == "unary" and expr.value in ("+", "-"):
-            src = self.operand(expr.args[0])
+        if expr.kind == "unary" and expr.value in ("+", "-", "~"):
+            src = self.operand(expr.args[0], width)
             if src.kind == "imm":
                 if expr.value == "+":
                     return src
                 try:
-                    text = str(-int(src.text))
+                    value = int(src.text)
                 except ValueError:
-                    text = f"(-{src.text})"
+                    text = f"({expr.value}{src.text})"
+                    if expr.value == "~" and width:
+                        text = f"({text} & {(1 << width) - 1})"
+                else:
+                    value = ~value if expr.value == "~" else -value
+                    if expr.value == "~" and width:
+                        value &= (1 << width) - 1
+                    text = str(value)
                 return Operand("imm", text)
-        if expr.kind == "binary" and expr.value in ("+", "-", "^"):
-            left, right = (self.operand(x) for x in expr.args)
+        if expr.kind == "binary" and expr.value in _BINARY:
+            left = self.operand(expr.args[0], width)
+            right = self.operand(expr.args[1], 0 if expr.value in ("<<", ">>") else width)
             if left.kind == right.kind == "imm":
+                if (expr.value in ("<<", ">>") and right.text.lstrip("-").isdecimal()
+                        and not 0 <= int(right.text) <= 255):
+                    raise ExxError(expr.line, "constant shift count must be in 0..255")
                 try:
                     a, b = int(left.text), int(right.text)
                 except ValueError:
                     text = f"({left.text} {expr.value} {right.text})"
                 else:
-                    text = str({"+": a + b, "-": a - b, "^": a ^ b}[expr.value])
+                    text = str(_BINARY[expr.value](a, b))
                 return Operand("imm", text)
         raise ExxError(expr.line, "this expression needs an explicit destination register")
 
-    def condition_operand(self, expr):
+    def condition_operand(self, expr, width=0):
         if expr.kind != "assign":
-            return self.operand(expr)
+            return self.operand(expr, width)
         target, rhs = expr.args
         dst = self.operand(target)
         if dst.kind != "reg":
@@ -162,7 +178,17 @@ class Lowering:
             self.emit(ins, line)
 
     def condition(self, expr, label, truth):
-        if expr.kind == "unary" and expr.value == "!":
+        if expr.kind == "binary" and expr.value in ("==", "!=") and any(arg.kind == "bit" for arg in expr.args):
+            bit, other = expr.args if expr.args[0].kind == "bit" else reversed(expr.args)
+            value = self.operand(other)
+            if value.kind != "imm" or value.text not in ("0", "1"):
+                raise ExxError(expr.line, "compare a bit with true, false, 1 or 0")
+            matches_set_bit = (value.text == "1") == (expr.value == "==")
+            self.condition(bit, label, truth == matches_set_bit)
+        elif expr.kind == "bit":
+            location, index = (self.operand(x) for x in expr.args)
+            self.target_code(self.cpu.bit_branch(location, index, label, truth), expr.line)
+        elif expr.kind == "unary" and expr.value == "!":
             self.condition(expr.args[0], label, not truth)
         elif expr.kind == "binary" and expr.value in ("&&", "||"):
             left, right = expr.args
@@ -178,7 +204,9 @@ class Lowering:
             comparison = expr.kind == "binary" and expr.value in ("==", "!=", "<", ">", "<=", ">=")
             left = self.condition_operand(expr.args[0] if comparison else expr)
             start = len(self.steps)
-            right = self.condition_operand(expr.args[1]) if comparison else None
+            right = self.condition_operand(expr.args[1], left.width) if comparison else None
+            if comparison and left.kind == "imm" and right.width:
+                left = self.operand(expr.args[0], right.width)
             for step in self.steps[start:]:
                 if self.cpu.operand_reads(left) & (step.instruction.writes | step.kills):
                     raise ExxError(expr.line, "right operand overwrites the left operand; use an explicit move")
@@ -187,6 +215,12 @@ class Lowering:
 
     def call(self, expr, targets=None, tail=False):
         callee = self.symbols.get(expr.value)
+        if callee is None and expr.value in self.cpu.update_names:
+            if targets is not None or tail:
+                raise ExxError(expr.line, f"use {expr.value} as a statement")
+            args = tuple(self.operand(arg) for arg in expr.args)
+            self.target_code(self.cpu.update_intrinsic(expr.value, args), expr.line)
+            return
         if callee is None:
             raise ExxError(expr.line, f"undeclared procedure {expr.value}")
         if len(expr.args) != len(callee.params):
@@ -212,6 +246,12 @@ class Lowering:
 
     def assign(self, stmt):
         rhs = stmt.value
+        if stmt.target.kind == "bit":
+            if stmt.op != "=":
+                raise ExxError(stmt.line, "bit assignment requires =")
+            location, index = (self.operand(x) for x in stmt.target.args)
+            self.target_code(self.cpu.bit_store(location, index, self.operand(rhs)), stmt.line)
+            return
         if rhs.kind == "call" and stmt.op == "=":
             self.call(rhs, elements(stmt.target))
             return
@@ -219,11 +259,17 @@ class Lowering:
         if dst.kind not in ("reg", "mem", "flag"):
             raise ExxError(stmt.line, "assignment requires a writable location")
         if stmt.op != "=":
-            code = self.cpu.binary(dst, stmt.op, self.operand(rhs))
-        elif rhs.kind == "binary" and rhs.value in ("+", "-", "^"):
-            left, right = (self.operand(x) for x in rhs.args)
+            width = 0 if stmt.op in ("<<=", ">>=") else dst.width
+            code = self.cpu.binary(dst, stmt.op, self.operand(rhs, width))
+        elif rhs.kind == "unary" and rhs.value == "~":
+            src = self.operand(rhs.args[0])
+            code = (self.cpu.move(dst, self.operand(rhs, dst.width)) if src.kind == "imm"
+                    else self.cpu.complement(dst, src))
+        elif rhs.kind == "binary" and rhs.value in _BINARY:
+            left = self.operand(rhs.args[0], dst.width)
+            right = self.operand(rhs.args[1], 0 if rhs.value in ("<<", ">>") else dst.width)
             if left.kind == right.kind == "imm":
-                code = self.cpu.move(dst, self.operand(rhs))
+                code = self.cpu.move(dst, self.operand(rhs, dst.width))
             elif left == dst:
                 code = self.cpu.binary(dst, rhs.value, right)
             else:
@@ -239,7 +285,8 @@ class Lowering:
         values = elements(stmt.value)
         if len(values) != len(self.proc.outputs):
             raise ExxError(stmt.line, f"expected {len(self.proc.outputs)} return values")
-        sources = tuple(self.operand(expr) for expr in values)
+        sources = tuple(self.operand(expr, self.cpu.register(name).width)
+                        for expr, name in zip(values, self.proc.outputs))
         code = self.cpu.constant_return(self.proc.outputs, sources, self.writable)
         if code is not None:
             self.target_code(code, stmt.line)

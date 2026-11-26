@@ -5,19 +5,15 @@ from .syntax import Expr, Param, Proc, Program, Stmt
 from .tokenizer import Token, tokenize
 
 
-_ASSIGN = frozenset({"=", "^=", "+=", "-="})
+_ASSIGN = frozenset({"=", "^=", "+=", "-=", "&=", "|=", "<<=", ">>="})
 _PRECEDENCE = {
     "||": 1,
     "&&": 2,
-    "^": 3,
-    "==": 4,
-    "!=": 4,
-    "<": 5,
-    "<=": 5,
-    ">": 5,
-    ">=": 5,
-    "+": 6,
-    "-": 6,
+    "|": 3, "^": 4, "&": 5,
+    "==": 6, "!=": 6,
+    "<": 7, "<=": 7, ">": 7, ">=": 7,
+    "<<": 8, ">>": 8,
+    "+": 9, "-": 9,
 }
 
 
@@ -213,9 +209,20 @@ class _Parser:
 
     def _primary(self) -> Expr:
         token = self.token
-        if token.value in {"!", "+", "-"}:
+        if token.value in {"!", "~", "+", "-"}:
             self._advance()
             return Expr("unary", token.value, (self._primary(),), token.line)
+        value = self._atom()
+        if self._accept("$"):
+            index = self._atom()
+            return Expr("bit", None, (value, index), token.line)
+        return value
+
+    def _atom(self) -> Expr:
+        token = self.token
+        if token.value in {"true", "false"}:
+            self._advance()
+            return Expr("int", int(token.value == "true"), (), token.line)
         if token.kind == "int":
             self._advance()
             radix = 0 if token.value.lower().startswith(("0x", "0b")) else 10

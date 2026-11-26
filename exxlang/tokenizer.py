@@ -19,9 +19,9 @@ _TOKEN = re.compile(
     r"|(?P<comment>//[^\r\n]*|/\*[\s\S]*?\*/)"
     r"|(?P<name>[a-zA-Z_][a-zA-Z_0-9]*)"
     r"|(?P<int>0[xX][0-9a-fA-F]+|0[bB][01]+|[0-9]+)"
-    r"|(?P<punct>->|→|\|\||&&|==|!=|<=|>=|\^=|\+=|-=|[(){}:;,!+\-.^<>=])"
+    r"|(?P<punct><<=|>>=|<<|>>|->|→|\|\||&&|==|!=|<=|>=|[&|^+\-]=|[(){}:;,!+\-.^<>=&|~$])"
 )
-_KEYWORDS = frozenset({"extern", "clobbers", "if", "else", "while", "return"})
+_KEYWORDS = frozenset({"extern", "clobbers", "if", "else", "while", "return", "true", "false"})
 
 
 def tokenize(source: str) -> list[Token]:

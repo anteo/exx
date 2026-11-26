@@ -42,6 +42,8 @@ def run(command: list[str], directory: Path) -> None:
 def assemble(example: Path, target: str, assembler: str, directory: Path) -> bytes:
     directory.mkdir()
     constants = VIDEO_CONSTANTS if example.stem == "video_plan_plane" else {}
+    if example.stem == "bit_operations":
+        constants = {"PACKET.status": 0, "PACKET.flags": 1}
     helpers = VIDEO_HELPERS if example.stem == "video_plan_plane" else ()
     command = [
         sys.executable, str(ROOT / "exx"), "--target", target,

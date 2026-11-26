@@ -157,3 +157,224 @@ The assembly check requires sjasmplus and z88dk-z80asm on PATH. It assembles
 and compares both outputs for every example. The DuoConf fixture supplies
 layout constants and four external helper stubs at matching addresses. Use
 `--sjasmplus PATH` or `--z80asm PATH` to select another installation.
+
+## Arithmetic and bits
+
+### Integer literals
+
+Use decimal, hexadecimal or binary notation. Both assignments below load 128.
+
+```text
+A = 0x80
+B = 0b10000000
+```
+
+```asm
+    ld a, 128
+    ld b, 128
+```
+
+### Accumulator arithmetic
+
+Choose the destination explicitly. To add B and C, copy B into A and add C. Separate statements
+with newlines or semicolons. Unsupported forms produce a diagnostic on the source line.
+
+```text
+A = B
+A += C
+```
+
+```asm
+    ld a, b
+    add a, c
+```
+
+### Register-pair arithmetic
+
+Increment or decrement a cursor directly. `HL += DE` selects `add hl,de`.
+
+```text
+HL += DE
+HL -= 1
+```
+
+```asm
+    add hl, de
+    dec hl
+```
+
+### Bit tests
+
+`$` selects a constant bit index from 0 to 7. Testing a register or indexed field uses `bit` and
+preserves CF.
+
+```text
+if (packet->status$3) return 1
+return 0
+```
+
+```asm
+    bit 3, (iy + PACKET.status)
+    jp z, exx__example_1
+    ld a, 1
+    ret
+exx__example_1:
+    ld a, 0
+    ret
+```
+
+### Bit writes
+
+Assign `true` or `false` to select `set` or `res`. Both instructions preserve F.
+
+```text
+packet->status$3 = false
+```
+
+```asm
+    res 3, (iy + PACKET.status)
+```
+
+### AND masks
+
+Keep selected bits in A with `&=`. This constant mask emits `and 127` and updates F.
+
+```text
+A &= ~(1 << 7)
+```
+
+```asm
+    and 127
+```
+
+### OR masks
+
+Set the mask bits in A with `|=`. This emits `or 128` and updates F.
+
+```text
+A |= 0x80
+```
+
+```asm
+    or 128
+```
+
+### Exclusive OR
+
+Toggle bits with `^=`. A register operand selects `xor` and updates F.
+
+```text
+A ^= E
+```
+
+```asm
+    xor e
+```
+
+### Byte complement
+
+`~A` inverts all eight bits using `cpl`. CF, S, Z and PV are preserved.
+
+```text
+A = ~A
+```
+
+```asm
+    cpl
+```
+
+### Logical byte shifts
+
+`<<=` shifts left and `>>=` shifts right, filling with zeros. Byte shifts and rotations accept a
+byte register or indexed byte field and a count known to EXX (0–255). Each step updates F. Zero
+steps preserve the value and flags.
+
+```text
+B >>= 2
+```
+
+```asm
+    srl b
+    srl b
+```
+
+### Arithmetic right shift
+
+`sra` copies the sign bit into the high bit at each step. Named shifts and
+rotations default to one step.
+
+```text
+sra(D, 2)
+```
+
+```asm
+    sra d
+    sra d
+```
+
+### Word left shift
+
+Shifting HL left by one selects `add hl,hl`. It updates CF, HF and N and preserves the remaining
+documented flags.
+
+```text
+HL <<= 1
+```
+
+```asm
+    add hl, hl
+```
+
+### Circular rotations
+
+`rlc` rotates left and `rrc` rotates right. The outgoing bit wraps around to the
+other end of the byte and is also copied to CF.
+
+```text
+rlc(B)
+```
+
+```asm
+    rlc b
+```
+
+### Rotations through carry
+
+`rl` and `rr` use CF as an extra bit. Here `sra d` puts bit 0 of
+D in carry, then `rr e` shifts that bit into E.
+
+```text
+sra(D)
+rr(E)
+```
+
+```asm
+    sra d
+    rr e
+```
+
+### Addition with carry
+
+`adc` adds the second operand and incoming CF to the first operand and updates F. Both A
+and HL have Z80 forms.
+
+```text
+adc(HL, DE)
+```
+
+```asm
+    adc hl, de
+```
+
+### Subtraction with borrow
+
+`sbc` subtracts the second operand and incoming CF from the first and updates F. Here it
+selects `sbc a,e`.
+
+```text
+sbc(A, E)
+```
+
+```asm
+    sbc a, e
+```

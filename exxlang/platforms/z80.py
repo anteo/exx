@@ -210,6 +210,8 @@ def _alu_source(src: Operand) -> bool:
 
 def binary(dst: Operand, op: str, src: Operand) -> tuple[Instruction, ...]:
     op = op.removesuffix("=")
+    if op in ("<<", ">>"):
+        return shift(dst, op, src)
     alu = {"+": "add", "-": "sub", "^": "xor", "&": "and", "|": "or"}
     if dst.kind == "reg" and dst.text == "A" and op in alu and _alu_source(src):
         operands = ("a", _text(src)) if op == "+" else (_text(src),)
@@ -235,6 +237,69 @@ def binary(dst: Operand, op: str, src: Operand) -> tuple[Instruction, ...]:
 def _jump(condition: str, label: str) -> Instruction:
     return Instruction("jp", (condition, label), resources(CONDITION_FLAGS[condition]),
                        branch_target=label)
+
+
+def _byte_location(operand: Operand) -> bool:
+    return operand.kind in ("reg", "mem") and _alu_source(operand)
+
+
+def bit_instruction(mnemonic, location, index):
+    if not _byte_location(location) or index.kind != "imm":
+        raise TargetError("bit access requires a byte register or indexed byte and a constant bit index")
+    value = _literal(index.text)
+    if value is not None and not 0 <= value <= 7:
+        raise TargetError("bit index must be in 0..7")
+    writes = FLAGS - {"CF"} if mnemonic == "bit" else resources(location.text)
+    return Instruction(mnemonic, (_text(index), _text(location)), _reads(location), writes)
+
+
+def bit_branch(location, index, label, truth):
+    return bit_instruction("bit", location, index), _jump("nz" if truth else "z", label)
+
+
+def bit_store(location, index, value):
+    if value.kind != "imm" or value.text not in ("0", "1"):
+        raise TargetError("assign true, false, 1 or 0 to a bit")
+    return (bit_instruction("set" if value.text == "1" else "res", location, index),)
+
+
+def complement(dst, src):
+    if dst != src or dst != register("A"):
+        raise TargetError("byte complement requires A = ~A")
+    return (Instruction("cpl", reads=resources("A"), writes=resources("A") | {"HF", "N"}),)
+
+
+_SHIFT_MNEMONICS = {"sra", "rlc", "rrc", "rl", "rr"}
+
+
+def shift(location, operation, count):
+    n = _literal(count.text) if count.kind == "imm" else None
+    if n is None or not 0 <= n <= 255:
+        raise TargetError("shift or rotation count must be a known integer in 0..255")
+    if operation == "<<" and location == register("HL"):
+        instruction, = binary(location, "+", location)
+    elif _byte_location(location):
+        mnemonic = {"<<": "sla", ">>": "srl"}.get(operation, operation)
+        reads = _reads(location)
+        if mnemonic in ("rl", "rr"):
+            reads |= {"CF"}
+        instruction = Instruction(mnemonic, (_text(location),), reads, resources(location.text) | FLAGS)
+    else:
+        raise TargetError(f"unsupported shift or rotation of {location.text}")
+    return (instruction,) * n
+
+
+def update_intrinsic(name, operands):
+    if name in _SHIFT_MNEMONICS and len(operands) in (1, 2):
+        count = operands[1] if len(operands) == 2 else Operand("imm", "1")
+        return shift(operands[0], name, count)
+    if name in ("adc", "sbc") and len(operands) == 2:
+        dst, src = operands
+        if ((dst == register("A") and _alu_source(src))
+                or (dst == register("HL") and src.kind == "reg" and src.text in ("BC", "DE", "HL", "SP"))):
+            return (Instruction(name, (_text(dst), _text(src)), _reads(dst) | _reads(src) | {"CF"},
+                                resources(dst.text) | FLAGS),)
+    raise TargetError(f"invalid operands for {name}")
 
 
 def jump(label: str) -> Instruction:
@@ -346,6 +411,11 @@ class Z80:
     operand_reads = staticmethod(_reads)
     move = staticmethod(move)
     binary = staticmethod(binary)
+    bit_branch = staticmethod(bit_branch)
+    bit_store = staticmethod(bit_store)
+    complement = staticmethod(complement)
+    update_names = _SHIFT_MNEMONICS | {"adc", "sbc"}
+    update_intrinsic = staticmethod(update_intrinsic)
     branch = staticmethod(branch)
     jump = staticmethod(jump)
     constant_return = staticmethod(constant_return)

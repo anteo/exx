@@ -1,0 +1,24 @@
+// Consume the pending bit, encode the channel and set the ready bit.
+update_channel(packet: PACKET → IX, channel → A) → A clobbers(F) {
+    if (!packet->status$0) return channel
+    packet->status$0 = false
+    channel &= 0b111
+    channel <<= 1
+    channel |= 0x80
+    packet->flags = channel
+    packet->status$1 = true
+    return channel
+}
+
+// Shift DE right as a single signed word and return the bit shifted out of E.
+halve_signed(word → DE) → (DE, CF) clobbers(F) {
+    sra(D)
+    rr(E)
+    return (word, CF)
+}
+
+// Add DE and the incoming carry to HL.
+accumulate(sum → HL, term → DE, carry → CF) → (HL, CF) clobbers(F) {
+    adc(sum, term)
+    return (sum, carry)
+}
