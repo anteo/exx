@@ -6,7 +6,7 @@ EXX translates high-level assembly into symbolic Z80 assembly.
 Procedures declare their input registers, results and clobbers.
 EXX requires Python 3.10 or newer and uses only the standard library.
 
-[Syntax manual](MANUAL.md)
+[Syntax manual](MANUAL.md) · [Quick reference for coding agents](QUICK_REFERENCE.md)
 
 ## Example
 

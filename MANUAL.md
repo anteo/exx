@@ -3,6 +3,7 @@
 [![English](https://img.shields.io/badge/lang-en-blue.svg)](MANUAL.md) [![Русский](https://img.shields.io/badge/lang-ru-green.svg)](MANUAL.ru.md)
 
 [EXX overview](README.md)
+[Quick reference for coding agents](QUICK_REFERENCE.md)
 
 ## Reading the examples
 

@@ -3,6 +3,7 @@
 [![English](https://img.shields.io/badge/lang-en-blue.svg)](MANUAL.md) [![Русский](https://img.shields.io/badge/lang-ru-green.svg)](MANUAL.ru.md)
 
 [Обзор EXX](README.ru.md)
+[Краткая памятка для ИИ-агентов](QUICK_REFERENCE.md)
 
 ## Как читать примеры
 
