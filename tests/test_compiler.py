@@ -173,6 +173,44 @@ class CompilerTests(unittest.TestCase):
                 }
             """)
 
+    def test_conditional_calls_keep_register_effects_on_the_taken_path(self):
+        proc, = compile_text("""
+            extern update() clobbers(B)
+            f(flag → Z) clobbers(B) { if (flag) update() }
+        """)
+        self.assertEqual(instructions(proc), [("call", ("z", "update")), ("ret", ())])
+        with self.assertRaisesRegex(ExxError, "B unavailable"):
+            compile_text("""
+                extern update() clobbers(B)
+                f(flag → Z, value → B) → A clobbers(B) {
+                    if (flag) update()
+                    return value
+                }
+            """)
+        with self.assertRaisesRegex(ExxError, "B unavailable"):
+            compile_text("""
+                extern get() → B
+                f(flag → Z) → A clobbers(B) {
+                    if (flag) get()
+                    return B
+                }
+            """)
+
+    def test_conditional_tail_call_participates_in_branch_selection(self):
+        for provider, op in (("extern get() → A", "jp"), ("get() → A { return 2 }", "jr")):
+            with self.subTest(provider=provider):
+                proc = compile_text(provider + "\nf(flag → Z) → A { if (flag) return get(); return 1 }")[-1]
+                self.assertEqual(instructions(proc), [(op, ("z", "get")), ("ld", ("a", "1")), ("ret", ())])
+
+    def test_conditional_tail_call_leaves_stack_cleanup_on_the_taken_path(self):
+        proc, = compile_text("""
+            extern next()
+            f(flag → Z) { keep(BC) { if (flag) return next(); B = 3 } }
+        """)
+        code = instructions(proc)
+        self.assertIn(("jr", ("nz", "exx__f_1")), code)
+        self.assertEqual(code[2:4], [("pop", ("bc",)), ("jp", ("next",))])
+
     def test_all_reachable_paths_produce_results(self):
         with self.assertRaisesRegex(ExxError, "can reach the end without returning"):
             compile_text("""

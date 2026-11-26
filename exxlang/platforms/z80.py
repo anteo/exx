@@ -1,6 +1,7 @@
 """Instruction selection and physical register effects for the Z80."""
 
 import re
+from dataclasses import replace
 from typing import Callable
 
 from ..ir import Instruction, Operand, TargetError, Transfer
@@ -548,15 +549,15 @@ def compact(code: list[Instruction]) -> tuple[Instruction, ...]:
             continue
 
         next_index = index
-        can_fold_return = (
-            len(instruction.operands) == 2
-            and instruction.operands[0] in INVERSE_CONDITION
-            and index < len(code)
-            and code[index].mnemonic == "ret"
-            and not code[index].operands
-        )
-        if can_fold_return:
-            next_index += 1
+        action = None
+        if len(instruction.operands) == 2 and instruction.operands[0] in INVERSE_CONDITION and index < len(code):
+            candidate = code[index]
+            if (candidate.mnemonic == "ret" and not candidate.operands
+                    or candidate.mnemonic == "call" and len(candidate.operands) == 1
+                    or candidate.mnemonic == "jp" and len(candidate.operands) == 1
+                    and candidate.branch_target is None and not candidate.falls_through):
+                action = candidate
+                next_index += 1
 
         target = instruction.operands[-1]
         while next_index < len(code) and code[next_index].mnemonic == "label":
@@ -565,11 +566,11 @@ def compact(code: list[Instruction]) -> tuple[Instruction, ...]:
             next_index += 1
         if next_index == len(code) or code[next_index].mnemonic != "label":
             compacted.append(instruction)
-        elif can_fold_return:
+        elif action is not None:
             condition = INVERSE_CONDITION[instruction.operands[0]]
-            ret = code[index]
-            compacted.append(Instruction("ret", (condition,), instruction.reads | ret.reads,
-                                         source_offset=max(instruction.source_offset, ret.source_offset)))
+            compacted.append(replace(action, operands=(condition, *action.operands),
+                                     reads=instruction.reads | action.reads, falls_through=True,
+                                     source_offset=max(instruction.source_offset, action.source_offset)))
             index += 1
 
     # EXX reserves these labels for internal jumps. Match symbolic operands too,

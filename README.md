@@ -307,6 +307,43 @@ fetch:
     jp read_byte
 ```
 
+### Conditional calls
+
+When a branch only calls a procedure, EXX can emit a conditional `call`.
+Register results and clobbers apply on the path that makes the call.
+
+```text
+extern update()
+refresh(ready → Z) { if (ready) update() }
+```
+
+```asm
+refresh:
+    call z, update
+    ret
+```
+
+### Conditional tail calls
+
+When the call can be made with the current register and stack state, EXX
+can fold a guarded tail call into a conditional jump. A nearby procedure
+in the same module can use `jr` under the usual branch selection rules.
+
+```text
+extern read_byte() → A
+fetch(ready → Z) → A {
+    if (ready) return read_byte()
+    return 0
+}
+```
+
+```asm
+fetch:
+    jp z, read_byte
+    ld a, 0
+    ret
+```
+
 ### Clobber declarations
 
 `clobbers` permits changes visible to the caller. A result remains available even if its
