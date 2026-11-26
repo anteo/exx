@@ -293,7 +293,7 @@ class _Parser:
             item = self._expression()
             if self._accept("="):
                 if item.kind != "name":
-                    raise ExxError(item.line, "a condition assignment requires a register name")
+                    raise ExxError(item.line, "a nested assignment requires a register name")
                 value = self._expression()
                 self._expect(")")
                 return Expr("assign", "=", (item, value), token.line)

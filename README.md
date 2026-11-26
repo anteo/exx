@@ -709,6 +709,26 @@ A = B + C
     add a, c
 ```
 
+### Assignment in arithmetic
+
+A parenthesized assignment writes the named register and uses that register
+as the operand. The expression evaluates operands from left to right and
+checks that a nested assignment preserves any value or address still in use.
+
+```text
+adjust(base → IY) → IY clobbers(DE, CF, HF, N) {
+    base += (DE = BS_WORKSPACE_OFF + RST8_DATA_OFF)
+    return base
+}
+```
+
+```asm
+adjust:
+    ld de, 0 + (BS_WORKSPACE_OFF + RST8_DATA_OFF)
+    add iy, de
+    ret
+```
+
 ### Register-pair arithmetic
 
 Increment or decrement a cursor directly. `HL += DE` selects `add hl,de`.

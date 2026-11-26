@@ -187,7 +187,7 @@ class Lowering:
                 return Operand("imm", expr.value)
             raise ExxError(expr.line, f"unknown name {expr.value}")
         if expr.kind == "assign":
-            raise ExxError(expr.line, "parenthesized assignment is only supported in conditions")
+            raise ExxError(expr.line, "parenthesized assignment requires a condition or arithmetic operand")
         if expr.kind == "int":
             return Operand("imm", str(expr.value))
         if expr.kind == "field":
@@ -236,14 +236,18 @@ class Lowering:
                 return Operand("imm", text)
         raise ExxError(expr.line, "this expression needs an explicit destination register")
 
-    def condition_operand(self, expr, width=0):
+    def value_operand(self, expr, width=0, preserve=frozenset()):
         if expr.kind != "assign":
             return self.operand(expr, width)
         target, rhs = expr.args
         dst = self.operand(target)
         if dst.kind != "reg":
-            raise ExxError(expr.line, "a condition assignment requires a register")
+            raise ExxError(expr.line, "a nested assignment requires a register")
+        start = len(self.steps)
         self.assign(Stmt("assign", expr.line, rhs, target=target, op="="))
+        for step in self.steps[start:]:
+            if preserve & (step.instruction.writes | step.instruction.invalidates | step.kills):
+                raise ExxError(expr.line, "nested assignment overwrites the left operand or destination address")
         return dst
 
     def target_code(self, instructions, line):
@@ -275,14 +279,10 @@ class Lowering:
                 self.mark(skip, expr.line)
         else:
             comparison = expr.kind == "binary" and expr.value in ("==", "!=", "<", ">", "<=", ">=")
-            left = self.condition_operand(expr.args[0] if comparison else expr)
-            start = len(self.steps)
-            right = self.condition_operand(expr.args[1], left.width) if comparison else None
+            left = self.value_operand(expr.args[0] if comparison else expr)
+            right = self.value_operand(expr.args[1], left.width, self.cpu.operand_reads(left)) if comparison else None
             if comparison and left.kind == "imm" and right.width:
                 left = self.operand(expr.args[0], right.width)
-            for step in self.steps[start:]:
-                if self.cpu.operand_reads(left) & (step.instruction.writes | step.kills):
-                    raise ExxError(expr.line, "right operand overwrites the left operand; use an explicit move")
             self.target_code(self.cpu.branch(left, expr.value if comparison else None, right,
                                         label, truth, new_label=self.label), expr.line)
 
@@ -340,16 +340,18 @@ class Lowering:
         dst = self.operand(stmt.target)
         if dst.kind not in ("reg", "mem", "flag"):
             raise ExxError(stmt.line, "assignment requires a writable location")
+        address_reads = self.cpu.operand_reads(dst) if dst.kind == "mem" else frozenset()
         if stmt.op != "=":
             width = 0 if stmt.op in ("<<=", ">>=") else dst.width
-            code = self.cpu.binary(dst, stmt.op, self.operand(rhs, width))
+            code = self.cpu.binary(dst, stmt.op, self.value_operand(rhs, width, self.cpu.operand_reads(dst)))
         elif rhs.kind == "unary" and rhs.value == "~":
-            src = self.operand(rhs.args[0])
+            src = self.value_operand(rhs.args[0], preserve=address_reads)
             code = (self.cpu.move(dst, self.operand(rhs, dst.width)) if src.kind == "imm"
                     else self.cpu.complement(dst, src))
         elif rhs.kind == "binary" and rhs.value in _BINARY:
-            left = self.operand(rhs.args[0], dst.width)
-            right = self.operand(rhs.args[1], 0 if rhs.value in ("<<", ">>") else dst.width)
+            left = self.value_operand(rhs.args[0], dst.width, address_reads)
+            right_width = 0 if rhs.value in ("<<", ">>") else dst.width
+            right = self.value_operand(rhs.args[1], right_width, address_reads | self.cpu.operand_reads(left))
             if left.kind == right.kind == "imm":
                 code = self.cpu.move(dst, self.operand(rhs, dst.width))
             else:
@@ -363,7 +365,7 @@ class Lowering:
                         raise ExxError(stmt.line, f"loading {dst.text} overwrites the right operand")
                 code = prefix + self.cpu.binary(dst, rhs.value, right)
         else:
-            code = self.cpu.move(dst, self.operand(rhs))
+            code = self.cpu.move(dst, self.value_operand(rhs, preserve=address_reads))
         self.target_code(code, stmt.line)
 
     def returns(self, stmt):

@@ -38,6 +38,31 @@ class CompilerTests(unittest.TestCase):
         with self.assertRaisesRegex(ExxError, "overwrites the left operand"):
             compile_text("pick(a → A, b → B) clobbers(A, F) { if (a == (a = b)) return }")
 
+    def test_arithmetic_assignments_use_the_explicit_registers(self):
+        proc, = compile_text("""
+            adjust(base → IY) → (IY, DE) clobbers(CF, HF, N) {
+                base += (DE = OFFSET + RST8_DATA_OFF)
+                return (base, DE)
+            }
+        """)
+        self.assertEqual(instructions(proc), [
+            ("ld", ("de", "0 + (OFFSET + RST8_DATA_OFF)")),
+            ("add", ("iy", "de")), ("ret", ()),
+        ])
+        proc, = compile_text("f() → A clobbers(B, F) { A = (A = 1) + (B = 2); return A }")
+        self.assertEqual(instructions(proc), [
+            ("ld", ("a", "1")), ("ld", ("b", "2")), ("add", ("a", "b")), ("ret", ()),
+        ])
+
+    def test_nested_arithmetic_assignment_preserves_inputs_and_addresses(self):
+        for source in (
+            "f(base → HL) → HL clobbers(F) { base += (HL = 2); return HL }",
+            "f(base → IX) clobbers(IX) { base[0] = (IX = 1) }",
+            "f(value → A) → A clobbers(F) { A = value - (A = 1); return A }",
+        ):
+            with self.subTest(source=source), self.assertRaisesRegex(ExxError, "overwrites the left operand"):
+                compile_text(source)
+
     def test_assembler_expression_remains_an_immediate(self):
         proc, = compile_text("value() → A { return OFFSET + 1 }")
         self.assertEqual(instructions(proc)[0], ("ld", ("a", "0 + (OFFSET + 1)")))
