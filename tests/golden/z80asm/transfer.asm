@@ -5,6 +5,8 @@
     PUBLIC set_alt_pointer
     PUBLIC replace_port_byte
 
+; Copy count bytes, preserving the caller's pointers, count and flags.
+; As with LDIR, a zero count copies 65536 bytes.
 copy_bytes:
     push af
     push hl
@@ -17,6 +19,7 @@ copy_bytes:
     pop af
     ret
 
+; Install a new pointer in the alternate HL, preserving the active bank.
 set_alt_pointer:
     push hl
     exx
@@ -24,6 +27,7 @@ set_alt_pointer:
     exx
     ret
 
+; Replace the port byte and return the value read before the write.
 replace_port_byte:
     in a, (c)
     out (c), e

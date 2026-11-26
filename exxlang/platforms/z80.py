@@ -546,7 +546,8 @@ def compact(code: list[Instruction]) -> tuple[Instruction, ...]:
         elif can_fold_return:
             condition = INVERSE_CONDITION[instruction.operands[0]]
             ret = code[index]
-            compacted.append(Instruction("ret", (condition,), instruction.reads | ret.reads))
+            compacted.append(Instruction("ret", (condition,), instruction.reads | ret.reads,
+                                         source_offset=max(instruction.source_offset, ret.source_offset)))
             index += 1
 
     # EXX reserves these labels for internal jumps. Match symbolic operands too,

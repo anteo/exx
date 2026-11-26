@@ -1,6 +1,6 @@
 """Physical operands and selected instructions consumed by the ABI analysis."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 class TargetError(ValueError):
@@ -33,3 +33,4 @@ class Instruction:
     falls_through: bool = True
     transfer: Transfer | None = None
     invalidates: frozenset[str] = frozenset()
+    source_offset: int = field(default=0, compare=False)

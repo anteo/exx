@@ -22,6 +22,8 @@ class Stmt:
     body: tuple[Stmt, ...] = ()
     otherwise: tuple[Stmt, ...] = ()
     op: str | None = None
+    start: int = 0
+    end: int = 0
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,8 @@ class Proc:
     clobbers: tuple[str, ...]
     body: tuple[Stmt, ...] | None
     line: int
+    start: int = 0
+    end: int = 0
 
 
 @dataclass(frozen=True)

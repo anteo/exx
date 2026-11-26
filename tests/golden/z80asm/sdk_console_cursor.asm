@@ -4,6 +4,8 @@
     PUBLIC zx__console_newline
     PUBLIC zx__console_advance
 
+; From zxevo-sdk lib/common/src/console/z80/zx__console_newline.asm
+; and zx__console_advance.asm. The row and column counts are nonzero.
 zx__console_newline:
     ld c, 0
     ld a, b

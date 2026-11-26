@@ -1,7 +1,7 @@
 """Convert EXX source text to tokens with line numbers."""
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .diagnostics import ExxError
 
@@ -11,6 +11,7 @@ class Token:
     kind: str
     value: str
     line: int
+    offset: int = field(default=0, compare=False)
 
 
 _TOKEN = re.compile(
@@ -24,7 +25,7 @@ _TOKEN = re.compile(
 _KEYWORDS = frozenset({"extern", "clobbers", "if", "else", "while", "repeat", "break", "return", "true", "false"})
 
 
-def tokenize(source: str) -> list[Token]:
+def tokenize(source: str, *, comments: list[Token] | None = None) -> list[Token]:
     source = source.replace("\r\n", "\n").replace("\r", "\n")
     tokens = []
     line = 1
@@ -40,6 +41,8 @@ def tokenize(source: str) -> list[Token]:
         kind = match.lastgroup
         value = match.group()
         if kind in {"comment", "newline"}:
+            if kind == "comment" and comments is not None:
+                comments.append(Token(kind, value, line, match.start()))
             if "\n" in value and parentheses == 0:
                 tokens.append(Token("newline", "\n", line))
             line += value.count("\n")
@@ -50,6 +53,6 @@ def tokenize(source: str) -> list[Token]:
                 parentheses -= 1
             if kind == "name" and value in _KEYWORDS:
                 kind = "keyword"
-            tokens.append(Token(kind, value, line))
+            tokens.append(Token(kind, value, line, match.start()))
     tokens.append(Token("eof", "", line))
     return tokens

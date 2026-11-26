@@ -1,5 +1,7 @@
 """Parse the EXX token stream into a syntax tree."""
 
+from dataclasses import replace
+
 from .diagnostics import ExxError
 from .syntax import DataSymbol, Expr, Field, Param, Proc, Program, Stmt
 from .tokenizer import Token, tokenize
@@ -107,6 +109,7 @@ class _Parser:
         return Program(tuple(procs), tuple(data), tuple(fields))
 
     def _procedure(self, is_extern: bool, line: int) -> Proc:
+        start = self.token.offset
         name = self._expect_name().value
         self._expect("(")
         params = []
@@ -126,7 +129,7 @@ class _Parser:
         else:
             self._skip_newlines()
             body = self._block()
-        return Proc(name, tuple(params), outputs, clobbers, body, line)
+        return Proc(name, tuple(params), outputs, clobbers, body, line, start, self.tokens[self.index - 1].offset)
 
     def _parameter(self) -> Param:
         name = self._expect_name()
@@ -175,6 +178,11 @@ class _Parser:
         return (self._statement(),)
 
     def _statement(self) -> Stmt:
+        start = self.token.offset
+        stmt = self._statement_body()
+        return replace(stmt, start=start, end=self.tokens[self.index - 1].offset)
+
+    def _statement_body(self) -> Stmt:
         token = self.token
         if token.value in {"if", "while", "repeat"}:
             return self._control()
@@ -294,6 +302,6 @@ class _Parser:
         return tuple(items)
 
 
-def parse(source: str) -> Program:
+def parse(source: str, *, comments: list[Token] | None = None) -> Program:
     """Parse EXX source, raising ExxError for invalid syntax."""
-    return _Parser(tokenize(source)).program()
+    return _Parser(tokenize(source, comments=comments)).program()

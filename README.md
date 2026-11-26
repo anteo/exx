@@ -145,6 +145,28 @@ build/%.asm: src/%.exx $(EXX_TOOL_DEPS)
 
 ## Procedures and registers
 
+### Source comments
+
+Both targets copy `//` and `/* … */` comments into the assembly as semicolon-prefixed lines.
+Procedure descriptions appear above their labels. A comment on a statement that emits no
+code stays in source order alongside the remaining instructions.
+
+```text
+// Return the page number supplied by the caller.
+read_page(page → E) → A {
+    /* The caller expects the result in A. */
+    return page
+}
+```
+
+```asm
+; Return the page number supplied by the caller.
+read_page:
+    ; The caller expects the result in A.
+    ld a, e
+    ret
+```
+
 ### Register parameters
 
 An arrow binds a parameter name to the register that holds it on entry. Here `page` already occupies E.

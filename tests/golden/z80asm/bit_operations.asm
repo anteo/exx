@@ -5,6 +5,7 @@
     PUBLIC halve_signed
     PUBLIC accumulate
 
+; Consume the pending bit, encode the channel and set the ready bit.
 update_channel:
     bit 0, (ix + PACKET_status)
     ret z
@@ -16,11 +17,13 @@ update_channel:
     set 1, (ix + PACKET_status)
     ret
 
+; Shift DE right as a single signed word and return the bit shifted out of E.
 halve_signed:
     sra d
     rr e
     ret
 
+; Add DE and the incoming carry to HL.
 accumulate:
     adc hl, de
     ret

@@ -1,7 +1,7 @@
 """Register contracts, structured control flow and platform lowering for EXX."""
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import operator
 
 from .diagnostics import ExxError
@@ -22,6 +22,16 @@ class Procedure:
     instructions: tuple[Instruction, ...]
     externals: set[str]
     platform: str
+    start: int = 0
+    end: int = 0
+
+
+class CompiledModule(list[Procedure]):
+    """Procedures and the source comments that may also occur outside them."""
+
+    def __init__(self, procedures, comments):
+        super().__init__(procedures)
+        self.comments = comments
 
 
 @dataclass
@@ -119,6 +129,7 @@ class Lowering:
         self.steps = []
         self.externals = set()
         self.counter = 0
+        self.position = proc.start
         self.loop_exits = []
         self.kept_words = []
         self.writable = parts(cpu, proc.outputs + proc.clobbers)
@@ -127,8 +138,8 @@ class Lowering:
         self.counter += 1
         return f"exx__{self.proc.name}_{self.counter}"
 
-    def emit(self, ins, line, kills=frozenset()):
-        self.steps.append(Step(ins, line, kills))
+    def emit(self, ins, line, kills=frozenset(), **keep):
+        self.steps.append(Step(replace(ins, source_offset=self.position), line, kills, **keep))
 
     def mark(self, label, line):
         self.emit(Instruction("label", (label,)), line)
@@ -378,22 +389,24 @@ class Lowering:
             reg = self.operand(arg)
             ins, = self.cpu.update_intrinsic("push", (reg,))
             slot = len(self.steps)
-            self.steps.append(Step(ins, arg.line, keep_slot=slot))
+            self.emit(ins, arg.line, keep_slot=slot)
             self.kept_words.append((slot, reg))
         self.block(stmt.body)
+        self.position = stmt.end
         self.restore_kept(depth, stmt.line)
         del self.kept_words[depth:]
 
     def restore_kept(self, depth, line, live=frozenset()):
         for slot, reg in reversed(self.kept_words[depth:]):
             ins, = self.cpu.update_intrinsic("pop", (reg,))
-            self.steps.append(Step(ins, line, keep_slot=slot, keep_live=live & self.cpu.resources(reg.text)))
+            self.emit(ins, line, keep_slot=slot, keep_live=live & self.cpu.resources(reg.text))
 
     def block(self, statements):
         outer = self.aliases
         self.aliases = dict(outer)
         for stmt in statements:
             try:
+                self.position = stmt.start
                 self.statement(stmt)
             except TargetError as error:
                 raise ExxError(stmt.line, str(error)) from error
@@ -445,6 +458,7 @@ class Lowering:
             self.loop_exits.append((end, len(self.kept_words)))
             self.block(stmt.body)
             self.loop_exits.pop()
+            self.position = stmt.end
             self.emit(back_edge, stmt.line)
             self.mark(end, stmt.line)
         else:
@@ -452,6 +466,7 @@ class Lowering:
 
     def finish(self):
         self.block(self.proc.body)
+        self.position = self.proc.end
         self.emit(Instruction("end"), self.proc.line)
         labels = {s.instruction.operands[0]: i for i, s in enumerate(self.steps)
                   if s.instruction.mnemonic == "label"}
@@ -485,9 +500,10 @@ class Lowering:
                 continue
             ins = step.instruction
             if ins.mnemonic == "end":
-                ins = self.cpu.ret()
+                ins = replace(self.cpu.ret(), source_offset=self.proc.end)
             code.append(ins)
-        return Procedure(self.proc.name, self.cpu.compact(code), self.externals, self.cpu.name)
+        return Procedure(self.proc.name, self.cpu.compact(code), self.externals, self.cpu.name,
+                         self.proc.start, self.proc.end)
 
 
 def compile_source(source: str, *, platform=None, interfaces=()) -> list[Procedure]:
@@ -499,6 +515,8 @@ def compile_source(source: str, *, platform=None, interfaces=()) -> list[Procedu
         except ExxError as error:
             error.source = path
             raise
-    program = parse(source)
+    comments = []
+    program = parse(source, comments=comments)
     collect_signatures(cpu, program, declared)
-    return [Lowering(proc, declared, cpu).finish() for proc in program.procs if proc.body is not None]
+    return CompiledModule((Lowering(proc, declared, cpu).finish() for proc in program.procs
+                           if proc.body is not None), comments)

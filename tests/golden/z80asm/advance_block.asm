@@ -4,6 +4,8 @@
     PUBLIC advance_block
     PUBLIC advance_block_demo
 
+; Move by at most limit bytes. The caller supplies limit <= remaining.
+; Return the distance in A, the new cursor in HL and the new count in DE.
 advance_block:
     ld a, b
     cp c
@@ -23,6 +25,7 @@ exx__advance_block_3:
     ld a, b
     ret
 
+; Move by at most four bytes within an eight-byte block.
 advance_block_demo:
     ld b, 4
     ld c, 8

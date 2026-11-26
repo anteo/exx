@@ -7,6 +7,7 @@
     EXTERN bs_storage_ops
     EXTERN ts_storage_ops
 
+; Install the selected dispatch table in the mapped workspace.
 select_ops:
     ld hl, bs_storage_ops
     cp DUO_TSCONF
@@ -17,6 +18,7 @@ exx__select_ops_1:
     ld (iy + DRV_HEADER_ops + 1), h
     ret
 
+; Copy up to B bytes, stopping before the first zero byte. B=0 means 256.
 copy_prefix:
 exx__copy_prefix_1:
     ld a, (de)
@@ -29,6 +31,7 @@ exx__copy_prefix_1:
 exx__copy_prefix_2:
     ret
 
+; Return the byte immediately before the cursor.
 previous_byte:
     ld a, (ix - 1)
     ret
