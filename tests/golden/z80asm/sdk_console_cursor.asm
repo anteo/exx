@@ -11,7 +11,7 @@ zx__console_newline:
     ld a, b
     add a, 1
     cp d
-    jp c, exx__zx__console_newline_1
+    jr c, exx__zx__console_newline_1
     ld a, d
     sub 1
 exx__zx__console_newline_1:
@@ -23,4 +23,4 @@ zx__console_advance:
     ld a, c
     cp e
     ret c
-    jp zx__console_newline
+    jr zx__console_newline

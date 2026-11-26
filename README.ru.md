@@ -413,7 +413,7 @@ return 0
 ```asm
     ld a, (ix + VID_SESSION.action)
     cp RST8_VID_PREP_DRAW
-    jp nz, exx__example_1
+    jr nz, exx__example_1
     ld a, 1
     ret
 exx__example_1:
@@ -432,7 +432,7 @@ return 0
 ```
 
 ```asm
-    jp nz, exx__example_1
+    jr nz, exx__example_1
     ld a, (ix + VID_SESSION.action)
     cp 1
     ret z
@@ -455,19 +455,44 @@ while (A) {
 ```asm
 exx__example_1:
     or a
-    jp z, exx__example_2
+    jr z, exx__example_2
     inc hl
     sub 1
-    jp exx__example_1
+    jr exx__example_1
 exx__example_2:
+```
+
+### Автоматический выбор длины перехода
+
+Для таргетов `asm` и `z80asm` EXX генерирует `jr` для безусловного перехода
+и условий `Z`, `NZ`, `C`, `NC`, если от конца инструкции до цели от −128 до +127 байт.
+Это правило действует и для хвостового перехода к другой процедуре в том же модуле.
+Для остальных условий, внешних символов и переходов через вставку ASM
+используется `jp`. Инструкции внутри `asm` передаются ассемблеру как написаны.
+
+```text
+choose(flag → Z) → A {
+    if (flag) return 1
+    return 2
+}
+```
+
+```asm
+choose:
+    jr nz, exx__choose_1
+    ld a, 1
+    ret
+exx__choose_1:
+    ld a, 2
+    ret
 ```
 
 ### Счётный цикл
 
 `repeat` выполняет тело, затем уменьшает B командой `djnz`, которая сохраняет флаги. При
-начальном нуле будет 256 итераций, если тело сохраняет B. Если обратный переход может оказаться
-слишком дальним, EXX использует ближнюю метку для `djnz` и абсолютные переходы.
-Расстояние через вставку ASM считается неизвестным.
+начальном нуле будет 256 итераций, если тело сохраняет B. Если начало цикла слишком далеко
+или расстояние неизвестно, `djnz` переходит на соседнюю команду `jp`, которая возвращает
+управление в начало цикла. Когда B достигает нуля, короткий `jr` пропускает этот `jp`.
 
 ```text
 count → B
@@ -502,7 +527,7 @@ repeat (B) {
 exx__example_1:
     ld a, (hl)
     or a
-    jp z, exx__example_2
+    jr z, exx__example_2
     inc hl
     djnz exx__example_1
 exx__example_2:
@@ -663,7 +688,7 @@ return 0
 
 ```asm
     bit 3, (iy + PACKET.status)
-    jp z, exx__example_1
+    jr z, exx__example_1
     ld a, 1
     ret
 exx__example_1:

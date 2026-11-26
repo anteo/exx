@@ -406,7 +406,7 @@ return 0
 ```asm
     ld a, (ix + VID_SESSION.action)
     cp RST8_VID_PREP_DRAW
-    jp nz, exx__example_1
+    jr nz, exx__example_1
     ld a, 1
     ret
 exx__example_1:
@@ -425,7 +425,7 @@ return 0
 ```
 
 ```asm
-    jp nz, exx__example_1
+    jr nz, exx__example_1
     ld a, (ix + VID_SESSION.action)
     cp 1
     ret z
@@ -448,19 +448,44 @@ while (A) {
 ```asm
 exx__example_1:
     or a
-    jp z, exx__example_2
+    jr z, exx__example_2
     inc hl
     sub 1
-    jp exx__example_1
+    jr exx__example_1
 exx__example_2:
+```
+
+### Automatic branch selection
+
+For both `asm` and `z80asm`, EXX emits `jr` for unconditional jumps and for
+`Z`, `NZ`, `C`, or `NC` when the destination is −128 to +127 bytes from the
+end of the instruction. This also applies to a tail jump to another procedure
+in the same module. Other conditions, external destinations, and jumps across
+a raw assembly block use `jp`. Instructions written inside `asm` pass through verbatim.
+
+```text
+choose(flag → Z) → A {
+    if (flag) return 1
+    return 2
+}
+```
+
+```asm
+choose:
+    jr nz, exx__choose_1
+    ld a, 1
+    ret
+exx__choose_1:
+    ld a, 2
+    ret
 ```
 
 ### Counted loops
 
 `repeat` runs the body, then decrements B using `djnz`, preserving flags for the loop test. An
-initial zero gives 256 iterations if the body leaves B alone. For a potentially out-of-range
-back edge EXX uses a nearby `djnz` and absolute jumps.
-A raw assembly block makes the distance across it unknown.
+initial zero gives 256 iterations if the body leaves B alone. If the loop head is out of
+range or its distance is unknown, `djnz` branches to a nearby `jp` back to the loop head.
+When B reaches zero, a short `jr` skips that `jp`.
 
 ```text
 count → B
@@ -494,7 +519,7 @@ repeat (B) {
 exx__example_1:
     ld a, (hl)
     or a
-    jp z, exx__example_2
+    jr z, exx__example_2
     inc hl
     djnz exx__example_1
 exx__example_2:
@@ -652,7 +677,7 @@ return 0
 
 ```asm
     bit 3, (iy + PACKET.status)
-    jp z, exx__example_1
+    jr z, exx__example_1
     ld a, 1
     ret
 exx__example_1:

@@ -5,6 +5,7 @@ from typing import Callable
 
 from ..ir import Instruction, Operand, TargetError, Transfer
 from ..registry import platforms
+from .z80_branches import relax_branches
 
 
 FLAGS = frozenset(("CF", "Z", "S", "PV", "HF", "N"))
@@ -161,12 +162,35 @@ def _validate_immediate(operand: Operand, width: int) -> None:
         raise TargetError(f"immediate {operand.text} does not fit in {width} bits")
 
 
+def _index_prefix(reg):
+    return int(reg in INDEX_REGISTERS)
+
+
+def _byte_operand_size(operand):
+    if operand.kind == "imm":
+        return 2
+    if operand.kind == "mem" and _indirect(operand)[0] in INDEX_REGISTERS:
+        return 3  # Prefix, opcode, displacement.
+    return 1
+
+
+def _load_size(dst, src):
+    if dst.kind == "mem" or src.kind == "mem":
+        mem, other = (dst, src) if dst.kind == "mem" else (src, dst)
+        if _indirect(mem)[0] is None:
+            return 3 if other.text in ("A", "HL") else 4
+        return _byte_operand_size(mem) + int(other.kind == "imm")
+    if src.kind == "imm":
+        return 1 + dst.width // 8 + _index_prefix(dst.text)
+    return 1 + _index_prefix(src.text)  # Includes LD SP,IX/IY.
+
+
 def _ld(dst: Operand, src: Operand) -> tuple[Instruction, ...]:
     if src.kind == "imm":
         _validate_immediate(src, dst.width)
     reads = _reads(src) | (_reads(dst) if dst.kind == "mem" else frozenset())
     writes = resources(dst.text) if dst.kind == "reg" else frozenset()
-    return (Instruction("ld", (_text(dst), _text(src)), reads, writes),)
+    return (Instruction("ld", (_text(dst), _text(src)), reads, writes, encoded_size=_load_size(dst, src)),)
 
 
 def _byte_load(dst: Operand, src: Operand) -> bool:
@@ -251,10 +275,10 @@ def constant_return(
         return None
 
     # Self-XOR always produces zero, so the old value of A is irrelevant.
-    clear_a = Instruction("xor", ("a",), writes=affected)
+    clear_a = Instruction("xor", ("a",), writes=affected, encoded_size=1)
     if result == 0:
         return (clear_a,)
-    increment = Instruction("inc", ("a",), resources("A"), affected - {"CF"})
+    increment = Instruction("inc", ("a",), resources("A"), affected - {"CF"}, encoded_size=1)
     return clear_a, increment
 
 
@@ -279,7 +303,7 @@ def binary(dst: Operand, op: str, src: Operand) -> tuple[Instruction, ...]:
     if dst.kind == "reg" and dst.text == "A" and op in alu and _alu_source(src):
         operands = ("a", _text(src)) if op == "+" else (_text(src),)
         reads = _reads(dst) | _reads(src)
-        return (Instruction(alu[op], operands, reads, resources("A") | FLAGS),)
+        return (Instruction(alu[op], operands, reads, resources("A") | FLAGS, encoded_size=_byte_operand_size(src)),)
     if op in ("+", "-") and src.kind == "imm" and _literal(src.text) == 1:
         inc_dec = "inc" if op == "+" else "dec"
         is_byte = _alu_source(dst) and dst.kind in ("reg", "mem")
@@ -288,12 +312,14 @@ def binary(dst: Operand, op: str, src: Operand) -> tuple[Instruction, ...]:
             writes = resources(dst.text) if dst.kind == "reg" else frozenset()
             if is_byte:
                 writes |= FLAGS - {"CF"}
-            return (Instruction(inc_dec, (_text(dst),), _reads(dst), writes),)
+            size = _byte_operand_size(dst) if is_byte else 1 + _index_prefix(dst.text)
+            return (Instruction(inc_dec, (_text(dst),), _reads(dst), writes, encoded_size=size),)
     if op == "+" and dst.kind == src.kind == "reg" and dst.text in ("HL", "IX", "IY"):
         if src.text in ("BC", "DE", "SP", dst.text):
             reads = _reads(dst) | _reads(src)
             writes = resources(dst.text) | {"CF", "HF", "N"}
-            return (Instruction("add", (_text(dst), _text(src)), reads, writes),)
+            return (Instruction("add", (_text(dst), _text(src)), reads, writes,
+                                encoded_size=1 + _index_prefix(dst.text)),)
     raise TargetError(f"cannot generate {dst.text} {op}= {src.text} on Z80 without a temporary")
 
 
@@ -313,7 +339,8 @@ def bit_instruction(mnemonic, location, index):
     if value is not None and not 0 <= value <= 7:
         raise TargetError("bit index must be in 0..7")
     writes = FLAGS - {"CF"} if mnemonic == "bit" else resources(location.text)
-    return Instruction(mnemonic, (_text(index), _text(location)), _reads(location), writes)
+    return Instruction(mnemonic, (_text(index), _text(location)), _reads(location), writes,
+                       encoded_size=1 + _byte_operand_size(location))
 
 
 def bit_branch(location, index, label, truth):
@@ -346,7 +373,8 @@ def shift(location, operation, count):
         reads = _reads(location)
         if mnemonic in ("rl", "rr"):
             reads |= {"CF"}
-        instruction = Instruction(mnemonic, (_text(location),), reads, resources(location.text) | FLAGS)
+        instruction = Instruction(mnemonic, (_text(location),), reads, resources(location.text) | FLAGS,
+                                  encoded_size=1 + _byte_operand_size(location))
     else:
         raise TargetError(f"unsupported shift or rotation of {location.text}")
     return (instruction,) * n
@@ -360,7 +388,7 @@ def update_intrinsic(name, operands):
         if operands and operands != tuple(register(r) for r in required):
             raise TargetError(f"expected {name}() or {name}({', '.join(required)})")
         reads = frozenset().union(*(resources(r) for r in required))
-        return (Instruction(name, reads=reads, writes=writes, invalidates=invalidates),)
+        return (Instruction(name, reads=reads, writes=writes, invalidates=invalidates, encoded_size=2),)
     if name == "out" and len(operands) == 2:
         port, value = operands
         return _port_instruction(False, value, port)
@@ -372,7 +400,7 @@ def update_intrinsic(name, operands):
         if ((dst == register("A") and _alu_source(src))
                 or (dst == register("HL") and src.kind == "reg" and src.text in ("BC", "DE", "HL", "SP"))):
             return (Instruction(name, (_text(dst), _text(src)), _reads(dst) | _reads(src) | {"CF"},
-                                resources(dst.text) | FLAGS),)
+                                resources(dst.text) | FLAGS, encoded_size=2 if dst.text == "HL" else _byte_operand_size(src)),)
     raise TargetError(f"invalid operands for {name}")
 
 
@@ -387,9 +415,11 @@ def _transfer(name, operands):
     if len(names) == 1 and names[0] in _STACK_PAIRS:
         word, = names
         if name in ("push", "pop"):
-            return (Instruction(name, (word.lower(),), transfer=Transfer(name, _word_cells(word))),)
+            return (Instruction(name, (word.lower(),), transfer=Transfer(name, _word_cells(word)),
+                                encoded_size=1 + _index_prefix(word)),)
         if name == "ex_sp" and word in ("HL", "IX", "IY"):
-            return (Instruction("ex", ("(sp)", word.lower()), transfer=Transfer("swap_stack", _word_cells(word))),)
+            return (Instruction("ex", ("(sp)", word.lower()), transfer=Transfer("swap_stack", _word_cells(word)),
+                                encoded_size=1 + _index_prefix(word)),)
     if name == "ex" and names in (("DE", "HL"), ("HL", "DE")):
         return (Instruction("ex", ("de", "hl"), transfer=Transfer("swap", _word_cells("DE"), _word_cells("HL"))),)
     if (name == "ex" and names == ("AF",)) or (name == "exx" and not names):
@@ -476,9 +506,10 @@ def branch(
     if not when_true:
         relation = NEGATED[relation]
     if right.kind == "imm" and _literal(right.text) == 0 and relation in ("==", "!="):
-        compare = Instruction("or", ("a",), resources("A"), FLAGS)
+        compare = Instruction("or", ("a",), resources("A"), FLAGS, encoded_size=1)
     else:
-        compare = Instruction("cp", (_text(right),), resources("A") | _reads(right), FLAGS)
+        compare = Instruction("cp", (_text(right),), resources("A") | _reads(right), FLAGS,
+                              encoded_size=_byte_operand_size(right))
     if relation == "<=":
         return compare, _jump("c", label), _jump("z", label)
     if relation == ">":
@@ -487,35 +518,6 @@ def branch(
         skip = new_label()
         return compare, _jump("c", skip), _jump("nz", label), Instruction("label", (skip,))
     return compare, _jump(COMPARISONS[relation], label)
-
-
-def _relax_repeat_edges(code):
-    # DJNZ is PC-relative. Bound distances in emitted order so widening an
-    # inner loop is reflected in the distance for every enclosing loop.
-    labels = {}
-    position = 0
-    last_opaque = -1
-    for ins in code:
-        if ins.mnemonic == "label":
-            labels[ins.operands[0]] = position
-        elif ins.mnemonic == "asm":
-            last_opaque = position
-            position += 4  # Keep offsets on either side of the block distinct.
-        elif ins.mnemonic == "djnz":
-            target = ins.branch_target
-            if labels[target] <= last_opaque or position + 2 - labels[target] > 128:
-                again, done = target + "_again", target + "_done"
-                yield Instruction("djnz", (again,), ins.reads, ins.writes, branch_target=again)
-                yield jump(done)
-                yield Instruction("label", (again,))
-                yield jump(target)
-                yield Instruction("label", (done,))
-                position += 8
-                continue
-            position += 2
-        else:
-            position += 4  # Maximum encoded length of one instruction selected here.
-        yield ins
 
 
 def compact(code: list[Instruction]) -> tuple[Instruction, ...]:
@@ -563,13 +565,13 @@ def compact(code: list[Instruction]) -> tuple[Instruction, ...]:
         for operand in instruction.operands
         for name in re.findall(r"\bexx__\w+", operand, re.IGNORECASE)
     }
-    return tuple(_relax_repeat_edges(
+    return tuple(
         instruction
         for instruction in compacted
         if instruction.mnemonic != "label"
         or not instruction.operands[0].lower().startswith("exx__")
         or instruction.operands[0].lower() in referenced
-    ))
+    )
 
 
 @platforms.register
@@ -598,6 +600,7 @@ class Z80:
     repeat_branch = staticmethod(repeat_branch)
     constant_return = staticmethod(constant_return)
     compact = staticmethod(compact)
+    layout_module = staticmethod(relax_branches)
 
     def call(self, name, inputs, outputs, tail):
         return Instruction("jp" if tail else "call", (name,), inputs, outputs, falls_through=not tail)

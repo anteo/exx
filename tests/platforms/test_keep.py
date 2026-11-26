@@ -14,7 +14,7 @@ class KeepTests(unittest.TestCase):
         code = assembly("f(count → BC, carry → CF) { keep(count, AF) { "
                         "if (carry) return; B = 3 } }")
         self.assertEqual(code, [
-            ("push", ("bc",)), ("push", ("af",)), ("jp", ("nc", "exx__f_1")),
+            ("push", ("bc",)), ("push", ("af",)), ("jr", ("nc", "exx__f_1")),
             ("pop", ("af",)), ("pop", ("bc",)), ("ret", ()),
             ("label", ("exx__f_1",)), ("ld", ("b", "3")),
             ("pop", ("af",)), ("pop", ("bc",)), ("ret", ()),
@@ -25,7 +25,7 @@ class KeepTests(unittest.TestCase):
                         "keep(DE) { if (flag) break; D = 3 } } } }")
         self.assertEqual(code.count(("pop", ("bc",))), 1)
         self.assertEqual(code.count(("pop", ("de",))), 2)
-        self.assertIn([("pop", ("de",)), ("jp", ("exx__f_2",))],
+        self.assertIn([("pop", ("de",)), ("jr", ("exx__f_2",))],
                       [code[i:i + 2] for i in range(len(code))])
 
     def test_return_checks_only_live_parts(self):

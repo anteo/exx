@@ -68,7 +68,7 @@ class RepeatTests(unittest.TestCase):
                             "repeat (n) { while (ready) { break }; A = 1; if (ready) break }; return A }")
         loop = next(args[0] for op, args in code if op == "djnz")
         self.assertIn(("label", (loop,)), code)
-        self.assertIn(("jp", ("z", "exx__f_2")), code)
+        self.assertIn(("jr", ("z", "exx__f_2")), code)
         with self.assertRaisesRegex(ExxError, "A unavailable"):
             instructions("f(n → B, ready → Z) → A clobbers(B) {repeat (n) {if (ready) break; A = 1}; return A}")
         with self.assertRaisesRegex(ExxError, "enclosing loop"):

@@ -9,18 +9,18 @@
 advance_block:
     ld a, b
     cp c
-    jp c, exx__advance_block_1
-    jp z, exx__advance_block_1
+    jr c, exx__advance_block_1
+    jr z, exx__advance_block_1
     ld a, c
 exx__advance_block_1:
     ld b, a
 exx__advance_block_2:
     or a
-    jp z, exx__advance_block_3
+    jr z, exx__advance_block_3
     inc hl
     dec de
     sub 1
-    jp exx__advance_block_2
+    jr exx__advance_block_2
 exx__advance_block_3:
     ld a, b
     ret

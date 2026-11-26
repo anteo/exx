@@ -83,13 +83,29 @@ def assemble(example: Path, target: str, assembler: str, directory: Path) -> byt
     return (directory / "example.bin").read_bytes()
 
 
+def assemble_branch_limits(directory: Path, sjasmplus: str, z80asm: str) -> None:
+    directory.mkdir()
+    source = directory / "branch_limit.exx"
+    # Each indexed store is four bytes. Three INC HLs put the target at +127.
+    for increments, branch in ((3, "30 7f"), (4, "d2 83 80")):
+        body = "ptr[1] = 3\n" * 31 + "HL += 1\n" * increments
+        source.write_text("skip(flag → CF, ptr → IX, p → HL) clobbers(HL) { if (flag) {\n"
+                          + body + "}}\n", encoding="utf-8")
+        expected = (bytes.fromhex(branch) + bytes.fromhex("dd 36 01 03") * 31
+                    + bytes([0x23]) * increments + bytes([0xc9]))
+        for target, tool in (("asm", sjasmplus), ("z80asm", z80asm)):
+            if assemble(source, target, tool, directory / f"{target}-{increments}") != expected:
+                raise RuntimeError(f"{target}: incorrectly encoded conditional branch over {124 + increments} bytes")
+    print("forward branches: both assemblers produced JR at +127 and JP beyond it")
+
+
 def assemble_long_repeat(directory: Path, sjasmplus: str, z80asm: str) -> None:
     directory.mkdir()
     source = directory / "long_repeat.exx"
     source.write_text("walk(p → HL, n → B) clobbers(HL, B) {repeat(n) {\n" +
                       "p += 1\n" * 130 + "}}\n", encoding="utf-8")
-    # At $8082 DJNZ reaches the backward JP. Falling through jumps to RET at $808A.
-    expected = bytes([0x23]) * 130 + bytes.fromhex("10 03 c3 8a 80 c3 00 80 c9")
+    # DJNZ skips the two-byte JR. On fallthrough JR skips the three-byte JP.
+    expected = bytes([0x23]) * 130 + bytes.fromhex("10 02 18 03 c3 00 80 c9")
     for target, tool in (("asm", sjasmplus), ("z80asm", z80asm)):
         if assemble(source, target, tool, directory / target) != expected:
             raise RuntimeError(f"{target}: incorrect long repeat branch encoding")
@@ -162,6 +178,7 @@ def main() -> int:
                     )
                 print(f"{example.name}: both assemblers produced the same {len(binary)} bytes")
             assemble_shared_abi(Path(scratch) / "shared", args.sjasmplus, args.z80asm)
+            assemble_branch_limits(Path(scratch) / "branches", args.sjasmplus, args.z80asm)
             assemble_long_repeat(Path(scratch) / "long", args.sjasmplus, args.z80asm)
             assemble_field_address(Path(scratch) / "word", args.sjasmplus, args.z80asm)
     except (OSError, RuntimeError) as error:

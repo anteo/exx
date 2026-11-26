@@ -4,7 +4,7 @@
 select_ops:
     ld hl, bs_storage_ops
     cp DUO_TSCONF
-    jp nz, exx__select_ops_1
+    jr nz, exx__select_ops_1
     ld hl, ts_storage_ops
 exx__select_ops_1:
     ld (iy + DRV_HEADER.ops), l
@@ -16,7 +16,7 @@ copy_prefix:
 exx__copy_prefix_1:
     ld a, (de)
     or a
-    jp z, exx__copy_prefix_2
+    jr z, exx__copy_prefix_2
     ld (hl), a
     inc de
     inc hl

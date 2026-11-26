@@ -7,29 +7,29 @@
 video_plan_plane:
     ld a, b
     cp RST8_VID_NO_WINDOW
-    jp nz, exx__video_plan_plane_1
+    jr nz, exx__video_plan_plane_1
     xor a
     ret
 exx__video_plan_plane_1:
     call video_window_matches
     ret c
-    jp nz, exx__video_plan_plane_3
+    jr nz, exx__video_plan_plane_3
     ld a, (ix + VID_SESSION.action)
     cp RST8_VID_PREP_DRAW
-    jp z, exx__video_plan_plane_4
+    jr z, exx__video_plan_plane_4
     xor a
     ret
 exx__video_plan_plane_4:
     ld a, (iy + VID_CTX.config)
     or a
-    jp z, exx__video_plan_plane_5
+    jr z, exx__video_plan_plane_5
     xor a
     ret
 exx__video_plan_plane_5:
     ld a, (ix + VID_SESSION.dest)
     xor 0 + (VID_CTX.slot0 ^ VID_CTX.slot1)
     call video_plane_conflict
-    jp nz, exx__video_plan_plane_6
+    jr nz, exx__video_plan_plane_6
     xor a
     ret
 exx__video_plan_plane_6:
@@ -37,12 +37,12 @@ exx__video_plan_plane_6:
 exx__video_plan_plane_3:
     ld a, (iy + VID_CTX.config)
     or a
-    jp z, exx__video_plan_plane_7
+    jr z, exx__video_plan_plane_7
     ld a, (ix + VID_SESSION.action)
     cp RST8_VID_SELECT_DRAW
-    jp z, exx__video_plan_plane_9
+    jr z, exx__video_plan_plane_9
     cp RST8_VID_SHOW_SLOT
-    jp nz, exx__video_plan_plane_8
+    jr nz, exx__video_plan_plane_8
 exx__video_plan_plane_9:
     jp video_unavailable
 exx__video_plan_plane_8:
@@ -51,13 +51,13 @@ exx__video_plan_plane_7:
     ret c
     ld a, (iy + VID_CTX.config)
     or a
-    jp nz, exx__video_plan_plane_11
+    jr nz, exx__video_plan_plane_11
     ld a, (ix + VID_SESSION.action)
     cp RST8_VID_PREP_DRAW
-    jp nz, exx__video_plan_plane_12
+    jr nz, exx__video_plan_plane_12
     ld a, VID_CTX.draw
     call video_plane_conflict
-    jp z, exx__video_plan_plane_13
+    jr z, exx__video_plan_plane_13
     xor a
     ret
 exx__video_plan_plane_13:

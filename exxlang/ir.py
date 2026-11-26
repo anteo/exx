@@ -34,3 +34,4 @@ class Instruction:
     transfer: Transfer | None = None
     invalidates: frozenset[str] = frozenset()
     source_offset: int = field(default=0, compare=False)
+    encoded_size: int | None = field(default=None, compare=False)

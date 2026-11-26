@@ -535,5 +535,9 @@ def compile_source(source: str, *, platform=None, interfaces=()) -> list[Procedu
     comments = []
     program = parse(source, comments=comments)
     collect_signatures(cpu, program, declared)
-    return CompiledModule((Lowering(proc, declared, cpu).finish() for proc in program.procs
-                           if proc.body is not None), comments, program.assembly)
+    module = CompiledModule((Lowering(proc, declared, cpu).finish() for proc in program.procs
+                             if proc.body is not None), comments, program.assembly)
+    layout = getattr(cpu, "layout_module", None)
+    if layout is not None:
+        layout(module)
+    return module

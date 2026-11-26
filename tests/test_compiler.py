@@ -245,7 +245,7 @@ class CompilerTests(unittest.TestCase):
             }
         """)
         ops = instructions(procedure)
-        self.assertTrue(any(op == "jp" and args[0] in ("z", "nz") for op, args in ops))
+        self.assertTrue(any(op == "jr" and args[0] in ("z", "nz") for op, args in ops))
         self.assertNotIn(("or", ("a",)), ops)
 
     def test_accumulator_test_requires_permission_to_change_flags(self):
