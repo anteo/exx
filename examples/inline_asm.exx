@@ -1,0 +1,17 @@
+asm {
+hex_digits:
+    defb "0123456789ABCDEF"
+}
+
+// Convert the low four bits of A to an uppercase hexadecimal digit.
+hex_digit(value → A) → A clobbers(DE, HL, F) {
+    value &= 0x0f
+    asm(value) → A clobbers(DE, HL, F) {
+        ld e, a
+        ld d, 0
+        ld hl, hex_digits
+        add hl, de
+        ld a, (hl)
+    }
+    return value
+}

@@ -29,9 +29,10 @@ class Procedure:
 class CompiledModule(list[Procedure]):
     """Procedures and the source comments that may also occur outside them."""
 
-    def __init__(self, procedures, comments):
+    def __init__(self, procedures, comments, assembly):
         super().__init__(procedures)
         self.comments = comments
+        self.assembly = assembly
 
 
 @dataclass
@@ -80,6 +81,8 @@ class Declarations:
 
 
 def collect_signatures(cpu, program, declarations, *, interface=False):
+    if interface and program.assembly:
+        raise ExxError(program.assembly[0].line, "an ABI file may only contain declarations")
     found = declarations.procedures
     for symbol in program.data:
         name = symbol.name
@@ -412,6 +415,17 @@ class Lowering:
                 raise ExxError(stmt.line, str(error)) from error
         self.aliases = outer
 
+    def assembly(self, block):
+        def locations(names, *, allow_group=False):
+            registers = [self.aliases[name][0] if name in self.aliases else name for name in names]
+            validate_group(self.cpu, registers, block.line, allow_group)
+            return parts(self.cpu, registers)
+
+        self.position = block.start
+        self.emit(Instruction("asm", (block.text,), reads=locations(block.inputs),
+                              writes=locations(block.outputs),
+                              invalidates=locations(block.clobbers, allow_group=True)), block.line)
+
     def statement(self, stmt):
         if stmt.kind == "bind":
             for name, reg in stmt.value:
@@ -420,6 +434,8 @@ class Lowering:
                 self.aliases[name] = (reg, self.layouts.get(reg))
         elif stmt.kind == "assign":
             self.assign(stmt)
+        elif stmt.kind == "asm":
+            self.assembly(stmt.value)
         elif stmt.kind == "call":
             self.call(stmt.value)
         elif stmt.kind == "return":
@@ -496,7 +512,8 @@ class Lowering:
                     queue.append(dest)
         code = []
         for index, step in enumerate(self.steps):
-            if index not in states:
+            # Even unreachable raw assembly may define symbols or assembler directives.
+            if index not in states and step.instruction.mnemonic != "asm":
                 continue
             ins = step.instruction
             if ins.mnemonic == "end":
@@ -519,4 +536,4 @@ def compile_source(source: str, *, platform=None, interfaces=()) -> list[Procedu
     program = parse(source, comments=comments)
     collect_signatures(cpu, program, declared)
     return CompiledModule((Lowering(proc, declared, cpu).finish() for proc in program.procs
-                           if proc.body is not None), comments)
+                           if proc.body is not None), comments, program.assembly)

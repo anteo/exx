@@ -94,6 +94,49 @@ Use `--include` to place layout and constant definitions before the generated pr
     INCLUDE "layout.inc"
 ```
 
+### File-scope assembly
+
+Use `asm { … }` to place tables, labels, macros or assembler directives between EXX procedures.
+Both targets emit the body in source order after the generated module header. Indentation, symbol
+spelling and comments inside the body pass through to the selected assembler. Write conditional
+assembly in its native dialect. EXX provides no separate `#define` or `#ifdef` preprocessor.
+
+```text
+asm {
+hex_digits:
+    defb "0123456789ABCDEF"
+}
+```
+
+```asm
+hex_digits:
+    defb "0123456789ABCDEF"
+```
+
+### Inline assembly with a register contract
+
+Inside a procedure, write the registers read in parentheses, the results after the arrow and
+other modified registers in `clobbers`. A contract can use register aliases. Inside the
+assembler text use the physical names. An omitted list is empty, so `asm { nop }` preserves
+all registers and flags. EXX uses the declaration to check surrounding code. The author of the
+block must honour it, preserve stack balance and pass control to the following EXX statement.
+Declare external references used solely in raw assembly using the assembler’s directives.
+
+```text
+invert(value → A) → A clobbers(HF, N) {
+    asm(value) → A clobbers(HF, N) {
+        cpl
+    }
+    return value
+}
+```
+
+```asm
+invert:
+        cpl
+    ret
+```
+
 ### Shared interfaces
 
 Pass the same declarations to the caller and the implementation. EXX checks input registers and
@@ -417,6 +460,7 @@ exx__example_2:
 `repeat` runs the body, then decrements B using `djnz`, preserving flags for the loop test. An
 initial zero gives 256 iterations if the body leaves B alone. For a potentially out-of-range
 back edge EXX uses a nearby `djnz` and absolute jumps.
+A raw assembly block makes the distance across it unknown.
 
 ```text
 count → B
@@ -1024,6 +1068,7 @@ python3 tests/assemble_examples.py
 
 ## Complete examples
 
+- [inline_asm.exx](examples/inline_asm.exx) — hexadecimal lookup table and inline assembly with register effects. [asm](tests/golden/asm/inline_asm.asm) · [z80asm](tests/golden/z80asm/inline_asm.asm)
 - [buffer.exx](examples/buffer.exx) — symbol addresses, word fields and bounded buffer copying. [asm](tests/golden/asm/buffer.asm) · [z80asm](tests/golden/z80asm/buffer.asm)
 - [transfer.exx](examples/transfer.exx) — stack saves, shadow registers and port access. [asm](tests/golden/asm/transfer.asm) · [z80asm](tests/golden/z80asm/transfer.asm)
 - [bit_operations.exx](examples/bit_operations.exx) — indexed bits and a signed shift across two registers. [asm](tests/golden/asm/bit_operations.asm) · [z80asm](tests/golden/z80asm/bit_operations.asm)

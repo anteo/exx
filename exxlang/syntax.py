@@ -14,10 +14,20 @@ class Expr:
 
 
 @dataclass(frozen=True)
+class AsmBlock:
+    text: str
+    line: int
+    start: int
+    inputs: tuple[str, ...] = ()
+    outputs: tuple[str, ...] = ()
+    clobbers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Stmt:
     kind: str
     line: int
-    value: Expr | tuple[tuple[str, str], ...] | None = None
+    value: Expr | AsmBlock | tuple[tuple[str, str], ...] | None = None
     target: Expr | None = None
     body: tuple[Stmt, ...] = ()
     otherwise: tuple[Stmt, ...] = ()
@@ -64,3 +74,4 @@ class Program:
     procs: tuple[Proc, ...]
     data: tuple[DataSymbol, ...] = ()
     fields: tuple[Field, ...] = ()
+    assembly: tuple[AsmBlock, ...] = ()

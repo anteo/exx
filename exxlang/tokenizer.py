@@ -22,7 +22,26 @@ _TOKEN = re.compile(
     r"|(?P<int>0[xX][0-9a-fA-F]+|0[bB][01]+|[0-9]+)"
     r"|(?P<punct><<=|>>=|<<|>>|->|→|\|\||&&|==|!=|<=|>=|[&|^+\-]=|[(){}\[\]*:;,!+\-.^<>=&|~$])"
 )
-_KEYWORDS = frozenset({"extern", "clobbers", "if", "else", "while", "repeat", "break", "return", "true", "false"})
+_KEYWORDS = frozenset({"asm", "extern", "clobbers", "if", "else", "while", "repeat", "break", "return", "true", "false"})
+
+# Braces inside assembler strings and comments are data. The apostrophe
+# in the Z80 register AF' is part of the register name.
+_ASM_DELIMITER = re.compile(
+    r""";[^\n]*|//[^\n]*|/\*[\s\S]*?(?:\*/|\Z)|"(?:\\[^\n]|""|[^"\\\n])*" """
+    r"""|(?<![\w'])'(?:\\[^\n]|''|[^'\\\n])*'|[{}]""", re.VERBOSE,
+)
+
+
+def _asm_end(source, start, line):
+    depth = 1
+    for match in _ASM_DELIMITER.finditer(source, start):
+        if match[0] == "{":
+            depth += 1
+        elif match[0] == "}":
+            depth -= 1
+            if depth == 0:
+                return match.start()
+    raise ExxError(line, "unterminated asm block")
 
 
 def tokenize(source: str, *, comments: list[Token] | None = None) -> list[Token]:
@@ -31,6 +50,7 @@ def tokenize(source: str, *, comments: list[Token] | None = None) -> list[Token]
     line = 1
     parentheses = 0
     offset = 0
+    asm_header = False
     while offset < len(source):
         match = _TOKEN.match(source, offset)
         if match is None:
@@ -46,6 +66,15 @@ def tokenize(source: str, *, comments: list[Token] | None = None) -> list[Token]
             if "\n" in value and parentheses == 0:
                 tokens.append(Token("newline", "\n", line))
             line += value.count("\n")
+        elif asm_header and value == "{":
+            end = _asm_end(source, offset, line)
+            body = source[offset:end]
+            tokens.append(Token("punct", "{", line, match.start()))
+            tokens.append(Token("asm_body", body, line, offset))
+            line += body.count("\n")
+            tokens.append(Token("punct", "}", line, end))
+            offset = end + 1
+            asm_header = False
         elif kind != "space":
             if value in ("(", "["):
                 parentheses += 1
@@ -53,6 +82,8 @@ def tokenize(source: str, *, comments: list[Token] | None = None) -> list[Token]
                 parentheses -= 1
             if kind == "name" and value in _KEYWORDS:
                 kind = "keyword"
+                if value == "asm":
+                    asm_header = True
             tokens.append(Token(kind, value, line, match.start()))
     tokens.append(Token("eof", "", line))
     return tokens

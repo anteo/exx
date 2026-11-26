@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 from .diagnostics import ExxError
-from .syntax import DataSymbol, Expr, Field, Param, Proc, Program, Stmt
+from .syntax import AsmBlock, DataSymbol, Expr, Field, Param, Proc, Program, Stmt
 from .tokenizer import Token, tokenize
 
 
@@ -84,6 +84,7 @@ class _Parser:
         procs = []
         data = []
         fields = []
+        assembly = []
         self._skip_separators()
         while self.token.kind != "eof":
             line = self.token.line
@@ -103,10 +104,30 @@ class _Parser:
                     raise ExxError(line, "field type must be u8 or u16")
                 fields.append(Field(name, 8 if kind == "u8" else 16, line))
                 self._expect_statement_end()
+            elif not is_extern and self.token.value == "asm":
+                assembly.append(self._assembly(file_scope=True))
             else:
                 procs.append(self._procedure(is_extern, line))
             self._skip_separators()
-        return Program(tuple(procs), tuple(data), tuple(fields))
+        return Program(tuple(procs), tuple(data), tuple(fields), tuple(assembly))
+
+    def _assembly(self, *, file_scope=False):
+        start = self._expect("asm")
+        self._skip_newlines()
+        inputs = outputs = clobbers = ()
+        if file_scope and self.token.value != "{":
+            raise ExxError(start.line, "a file-scope asm block takes no register contract")
+        if self.token.value == "(":
+            inputs = self._names()
+        if self._accept_after_newlines("→", "->"):
+            outputs = self._names() if self.token.value == "(" else (self._expect_name().value,)
+        if self._accept_after_newlines("clobbers"):
+            clobbers = self._names()
+        self._skip_newlines()
+        self._expect("{")
+        body = self._advance()
+        self._expect("}")
+        return AsmBlock(body.value, start.line, body.offset, inputs, outputs, clobbers)
 
     def _procedure(self, is_extern: bool, line: int) -> Proc:
         start = self.token.offset
@@ -184,6 +205,8 @@ class _Parser:
 
     def _statement_body(self) -> Stmt:
         token = self.token
+        if token.value == "asm":
+            return Stmt("asm", token.line, self._assembly())
         if token.value in {"if", "while", "repeat"}:
             return self._control()
         if self._accept("break"):

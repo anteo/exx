@@ -494,12 +494,16 @@ def _relax_repeat_edges(code):
     # inner loop is reflected in the distance for every enclosing loop.
     labels = {}
     position = 0
+    last_opaque = -1
     for ins in code:
         if ins.mnemonic == "label":
             labels[ins.operands[0]] = position
+        elif ins.mnemonic == "asm":
+            last_opaque = position
+            position += 4  # Keep offsets on either side of the block distinct.
         elif ins.mnemonic == "djnz":
             target = ins.branch_target
-            if position + 2 - labels[target] > 128:
+            if labels[target] <= last_opaque or position + 2 - labels[target] > 128:
                 again, done = target + "_again", target + "_done"
                 yield Instruction("djnz", (again,), ins.reads, ins.writes, branch_target=again)
                 yield jump(done)
