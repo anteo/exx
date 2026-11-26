@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.2.0
+
+### Documentation
+
+- (readme) clarify generic Z80 assembly output
+
+### Features
+
+- (quicklook) add separate build and install targets
+- (editors) add EXX highlighting for Zed and VS Code
+
+### Fixes
+
+- (release) push release commits and tags atomically
+
+### Refactoring
+
+- (build) delegate test and release targets
+
 ## v0.1.0
 
 ### Documentation
