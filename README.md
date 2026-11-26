@@ -2,8 +2,8 @@
 
 [![English](https://img.shields.io/badge/lang-en-blue.svg)](README.md) [![Русский](https://img.shields.io/badge/lang-ru-green.svg)](README.ru.md)
 
-EXX translates high-level assembly into Z80 assembly for sjasmplus and
-z88dk-z80asm. Procedures declare their input registers, results and clobbers.
+EXX translates high-level assembly into symbolic Z80 assembly.
+Procedures declare their input registers, results and clobbers.
 EXX requires Python 3.10 or newer and uses only the standard library.
 
 [Syntax manual](MANUAL.md)
@@ -32,8 +32,9 @@ minimum:
 
 ### Assembly fragment
 
-The `asm` target emits symbolic Z80 instructions. Include the file in the desired ROM bank with
-`INCLUDE "cursor.asm"`. The host assembler determines its address.
+The `asm` target emits a plain Z80 assembly fragment for inclusion in an
+assembly project. The surrounding source determines its address. The examples
+are tested with sjasmplus, which includes the fragment with `INCLUDE "cursor.asm"`.
 
 ```sh
 ./exx --target asm examples/sdk_console_cursor.exx -o cursor.asm
