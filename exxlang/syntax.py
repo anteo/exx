@@ -81,6 +81,21 @@ class Struct:
 
 
 @dataclass(frozen=True)
+class Constant:
+    name: str
+    value: Expr
+    line: int
+    start: int
+
+
+@dataclass(frozen=True)
+class Origin:
+    value: Expr
+    line: int
+    start: int
+
+
+@dataclass(frozen=True)
 class DataSymbol:
     name: str
     line: int
@@ -97,3 +112,5 @@ class Program:
     assembly: tuple[AsmBlock, ...] = ()
     layouts: tuple[Layout, ...] = ()
     structs: tuple[Struct, ...] = ()
+    constants: tuple[Constant, ...] = ()
+    origins: tuple[Origin, ...] = ()

@@ -16,7 +16,7 @@
         },
         { "name": "keyword.control.exx", "match": "\\b(?:if|else|while|repeat|break|goto|return)\\b" },
         { "name": "keyword.other.exx", "match": "\\b(?:extern|data|field|clobbers|keep|asm)\\b" },
-        { "name": "keyword.other.exx", "match": "\\b(?:(?:layout|struct)(?=[ \\t]+[a-zA-Z_]|[ \\t]*\\{)|frame(?=[ \\t]*\\()|stack(?=[ \\t]*\\[))" },
+        { "name": "keyword.other.exx", "match": "\\b(?:origin\\b|(?:layout|struct|const)(?=[ \\t]+[a-zA-Z_]|[ \\t]*\\{)|frame(?=[ \\t]*\\()|stack(?=[ \\t]*\\[))" },
         { "name": "storage.type.exx", "match": "\\b(?:u8|u16)\\b" },
         { "name": "constant.language.boolean.exx", "match": "\\b(?:true|false)\\b" },
         { "include": "#abi-locations" },

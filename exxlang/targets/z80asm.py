@@ -37,6 +37,9 @@ class Z80Asm(Assembler):
 
         return _SYMBOL.sub(render, super().operands(items))
 
+    def constant(self, name, value):
+        return f"    DEFC {self.operands((name,))} = {value}"
+
     def structure_lines(self, structures):
         definitions = {struct.name: struct for struct in structures}
         result = []

@@ -832,6 +832,42 @@ A = VID_CTX.slot0 ^ VID_CTX.slot1
     ld a, 0 + (VID_CTX.slot0 ^ VID_CTX.slot1)
 ```
 
+### Constants declared in EXX
+
+Declare one constant with `const NAME = expression` or put several in a
+`const { … }` block. Constant expressions can use integer arithmetic,
+other constants, and structure sizes and offsets. EXX emits `EQU` or `DEFC`
+for definitions in the source being translated.
+
+```text
+const {
+    SCREEN = 0x4000
+    ATTRIBUTES = SCREEN + 0x1800
+}
+```
+
+```asm
+SCREEN EQU 16384
+ATTRIBUTES EQU 22528
+```
+
+### Assembly origin
+
+`origin expression` emits `ORG` at that point in the source. The assembler
+applies its own placement rules. z88dk-z80asm can emit a separate binary for
+a section with an explicit origin.
+
+```text
+origin 0x8000
+data marker: u8 = 42
+```
+
+```asm
+    ORG 32768
+marker:
+    defb 42
+```
+
 ## Arithmetic and bits
 
 ### Integer literals

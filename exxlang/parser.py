@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 from .diagnostics import ExxError
-from .syntax import AsmBlock, DataSymbol, Expr, Field, Layout, Param, Proc, Program, Stmt, Struct
+from .syntax import AsmBlock, Constant, DataSymbol, Expr, Field, Layout, Origin, Param, Proc, Program, Stmt, Struct
 from .tokenizer import Token, tokenize
 
 
@@ -96,6 +96,8 @@ class _Parser:
         assembly = []
         layouts = []
         structs = []
+        constants = []
+        origins = []
         self._skip_separators()
         while self.token.kind != "eof":
             line = self.token.line
@@ -115,12 +117,20 @@ class _Parser:
                 self._skip_newlines()
                 self._expect("{")
                 structs.append(Struct(name, self._members(), line))
+            elif not is_extern and self.token.value == "const" and (following.kind == "name" or following.value == "{"):
+                self._advance()
+                self._declaration_group(lambda: constants.append(self._constant()))
+            elif not is_extern and self.token.value == "origin":
+                start = self._advance()
+                origins.append(Origin(self._expression(), start.line, start.offset))
+                self._expect_statement_end()
             elif not is_extern and self.token.value == "asm":
                 assembly.append(self._assembly(file_scope=True))
             else:
                 procs.append(self._procedure(is_extern, line))
             self._skip_separators()
-        return Program(tuple(procs), tuple(data), tuple(fields), tuple(assembly), tuple(layouts), tuple(structs))
+        return Program(tuple(procs), tuple(data), tuple(fields), tuple(assembly), tuple(layouts), tuple(structs),
+                       tuple(constants), tuple(origins))
 
     def _declaration_group(self, entry):
         if self._accept("{"):
@@ -171,6 +181,11 @@ class _Parser:
         layouts.append(Layout(name, self._integer(), line))
         if self._accept_after_newlines("{"):
             self._grouped_fields(name, fields)
+
+    def _constant(self):
+        name = self._expect_name()
+        self._expect("=")
+        return Constant(name.value, self._expression(), name.line, name.offset)
 
     def _data(self, is_extern):
         start = self._expect("data")

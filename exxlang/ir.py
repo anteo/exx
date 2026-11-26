@@ -25,6 +25,13 @@ class StaticData:
 
 
 @dataclass(frozen=True)
+class Directive:
+    name: str | None
+    value: str
+    start: int
+
+
+@dataclass(frozen=True)
 class StructMember:
     name: str
     type_name: str

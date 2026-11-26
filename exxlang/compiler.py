@@ -7,7 +7,7 @@ import operator
 from .diagnostics import ExxError
 from .flow import Flow
 from .parser import parse
-from .ir import Instruction, Operand, StaticData, TargetError
+from .ir import Directive, Instruction, Operand, StaticData, TargetError
 from .layouts import LayoutTable, SCALAR_WIDTHS as _SCALAR_WIDTHS
 from .registry import platforms
 from .syntax import Stmt
@@ -30,12 +30,13 @@ class Procedure:
 class CompiledModule(list[Procedure]):
     """Lowered procedures and other module items in source order."""
 
-    def __init__(self, procedures, comments, assembly, data, structs):
+    def __init__(self, procedures, comments, assembly, data, structs, directives):
         super().__init__(procedures)
         self.comments = comments
         self.assembly = assembly
         self.data = data
         self.structs = structs
+        self.directives = directives
 
 
 @dataclass
@@ -126,6 +127,8 @@ class Declarations:
     procedures: dict = field(default_factory=dict)
     data: dict = field(default_factory=dict)
     layouts: LayoutTable = field(default_factory=LayoutTable)
+    constants: dict = field(default_factory=dict)
+    constant_values: dict = field(default_factory=dict)
 
     def data_address(self, symbol, externals):
         if symbol.kind != "name" or symbol.value not in self.data:
@@ -143,6 +146,44 @@ class Declarations:
         if offset is not None:
             return Operand("imm", f"({offset})" if " + " in offset else offset)
 
+    def collect_constants(self, cpu, program, source):
+        for constant in program.constants:
+            name = constant.name
+            if (name in self.constants or name in self.layouts.definitions or cpu.register(name.upper())
+                    or name.upper() in cpu.unsupported_registers or name.lower().startswith("exx__")):
+                error = ExxError(constant.line, f"invalid or conflicting constant {name}")
+                error.source = source
+                raise error
+            self.constants[name] = (constant, source)
+
+    def evaluate_constant(self, name, cpu, parents=()):
+        if name not in self.constant_values:
+            declaration, source = self.constants[name]
+            try:
+                if name in parents:
+                    raise ExxError(declaration.line, "recursive constant: " + " → ".join((*parents, name)))
+                self.constant_values[name] = self.require_constant(declaration.value, cpu, (*parents, name))
+            except ExxError as error:
+                if error.source is None:
+                    error.source = source
+                raise
+        return self.constant_values[name]
+
+    def require_constant(self, expr, cpu, parents=()):
+        if expr.kind == "name":
+            name = expr.value
+            if name in self.constants:
+                return self.evaluate_constant(name, cpu, parents)
+            layout = self.layout_constant(name, expr.line)
+            if layout is not None:
+                return layout
+            if not cpu.register(name.upper()) and name.upper() not in cpu.unsupported_registers:
+                return Operand("imm", name)
+        value = constant_operand(expr, 0, lambda operand, width: self.require_constant(operand, cpu, parents))
+        if value is None:
+            raise ExxError(expr.line, "expected a constant expression")
+        return value
+
 
 def lower_data(symbol, declarations, cpu):
     externals = set()
@@ -154,6 +195,8 @@ def lower_data(symbol, declarations, cpu):
                 raise ExxError(expr.line, "a data address initializer requires u16")
             return declarations.data_address(expr.args[0], externals)
         if expr.kind == "name":
+            if expr.value in declarations.constant_values:
+                return declarations.constant_values[expr.value]
             offset = declarations.layout_constant(expr.value, expr.line)
             if offset is not None:
                 return offset
@@ -218,10 +261,12 @@ def resolve_stack_arguments(cpu, proc, declarations):
 def collect_signatures(cpu, program, declarations, *, interface=False):
     if interface and program.assembly:
         raise ExxError(program.assembly[0].line, "an ABI file may only contain declarations")
+    if interface and program.origins:
+        raise ExxError(program.origins[0].line, "origin belongs in an assembly source, outside a shared ABI")
     found = declarations.procedures
     for symbol in program.data:
         name = symbol.name
-        if (name in found or name in declarations.layouts.definitions
+        if (name in found or name in declarations.constants or name in declarations.layouts.definitions
                 or name.lower().startswith("exx__") or cpu.register(name.upper())
                 or name.upper() in cpu.unsupported_registers):
             raise ExxError(symbol.line, f"invalid or conflicting data symbol {name}")
@@ -239,10 +284,10 @@ def collect_signatures(cpu, program, declarations, *, interface=False):
     for proc in program.procs:
         if proc.name in declarations.data:
             raise ExxError(proc.line, f"{proc.name} is declared as data")
-        if proc.name in declarations.layouts.definitions:
-            raise ExxError(proc.line, f"{proc.name} is declared as a struct")
+        if proc.name in declarations.constants or proc.name in declarations.layouts.definitions:
+            raise ExxError(proc.line, f"{proc.name} is declared as a constant or struct")
         if interface and proc.body is not None:
-            raise ExxError(proc.line, "a shared ABI file may only contain extern, struct, layout and field declarations")
+            raise ExxError(proc.line, "a shared ABI file may only contain extern, struct, layout, field and const declarations")
         if proc.name.lower().startswith("exx__"):
             raise ExxError(proc.line, "the exx__ prefix is reserved for generated labels")
         validate_group(cpu, (p.register for p in proc.params if p.register is not None), proc.line)
@@ -379,6 +424,8 @@ class Lowering:
                     raise ExxError(expr.line, f"declare a type for data {expr.value} to access its value")
                 address = self.declarations.data_address(expr, self.externals)
                 return self.cpu.absolute_operand(address, _SCALAR_WIDTHS[declaration.type_name])
+            if expr.value in self.declarations.constant_values:
+                return self.declarations.constant_values[expr.value]
             offset = self.declarations.layout_constant(expr.value, expr.line)
             if offset is not None:
                 return offset
@@ -773,6 +820,11 @@ def compile_source(source: str, *, platform=None, interfaces=()) -> CompiledModu
     declared.layouts.collect(program, None)
     declared.layouts.resolve()
     for path, unit in parsed_interfaces:
+        declared.collect_constants(cpu, unit, path)
+    declared.collect_constants(cpu, program, None)
+    for name in declared.constants:
+        declared.evaluate_constant(name, cpu)
+    for path, unit in parsed_interfaces:
         try:
             collect_signatures(cpu, unit, declared, interface=True)
         except ExxError as error:
@@ -780,9 +832,12 @@ def compile_source(source: str, *, platform=None, interfaces=()) -> CompiledModu
             raise
     collect_signatures(cpu, program, declared)
     data = tuple(lower_data(symbol, declared, cpu) for symbol in program.data if symbol.initializer is not None)
+    directives = [Directive(c.name, declared.constant_values[c.name].text, c.start) for c in program.constants]
+    directives.extend(Directive(None, declared.require_constant(origin.value, cpu).text, origin.start)
+                      for origin in program.origins)
     module = CompiledModule((Lowering(declared.procedures[proc.name], declared, cpu).finish() for proc in program.procs
                              if proc.body is not None), comments, program.assembly, data,
-                            tuple(declared.layouts.definitions.values()))
+                            tuple(declared.layouts.definitions.values()), tuple(directives))
     layout = getattr(cpu, "layout_module", None)
     if layout is not None:
         layout(module)

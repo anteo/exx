@@ -60,3 +60,21 @@ class DeclarationTests(unittest.TestCase):
         ):
             with self.subTest(source=source), self.assertRaisesRegex(ExxError, diagnostic):
                 compile_source(source)
+
+    def test_const_and_origin_emit_assembler_directives_in_source_order(self):
+        module = compile_source("""
+            const { BASE = 0x8000, START = BASE + 3 }
+            origin START
+            data code: u8 = VALUE
+            const VALUE = 42
+            A get() { return VALUE }
+        """)
+        for target, definition in (("asm", "BASE EQU 32768"), ("sjasmplus", "BASE EQU 32768"),
+                                   ("z80asm", "DEFC BASE = 32768")):
+            with self.subTest(target=target):
+                output = emit(module, target)
+                self.assertLess(output.index(definition), output.index("ORG 32771"))
+                self.assertLess(output.index("ORG 32771"), output.index("code:\n    defb 42"))
+                self.assertIn("ld a, 42", output)
+        with self.assertRaisesRegex(ExxError, "recursive constant"):
+            compile_source("const { FIRST = SECOND, SECOND = FIRST }")

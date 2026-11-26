@@ -181,6 +181,23 @@ def assemble_shared_structures(directory: Path, sjasmplus: str, z80asm: str) -> 
     print("shared structures: both assemblers consumed generated layout includes")
 
 
+def assemble_origin(directory: Path, sjasmplus: str, z80asm: str) -> None:
+    directory.mkdir()
+    (directory / "origin.exx").write_text(
+        "const { START = 0x8123, VALUE = 9 }\norigin START\ndata marker: u8 = VALUE\n"
+        "HL address() { return &marker }\n", encoding="utf-8")
+    for target, assembler in (("sjasmplus", sjasmplus), ("z80asm", z80asm)):
+        run([sys.executable, str(ROOT / "exx"), "--target", target, "origin.exx",
+             "-o", "generated.asm"], directory)
+        command = ([assembler, "--nologo", "--raw=example.bin", "generated.asm"] if target == "sjasmplus"
+                   else [assembler, "-b", "-o=example.bin", "generated.asm"])
+        run(command, directory)
+        binary = "example.bin" if target == "sjasmplus" else "example_code_user.bin"
+        if (directory / binary).read_bytes() != bytes.fromhex("09 21 23 81 c9"):
+            raise RuntimeError(f"{target}: origin did not place the data at 0x8123")
+    print("origin and constants: both assemblers resolved the same bytes and address")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sjasmplus", default=os.environ.get("SJASMPLUS", "sjasmplus"))
@@ -213,6 +230,7 @@ def main() -> int:
                 print(f"{example.name}: both assemblers produced the same {len(binary)} bytes")
             assemble_shared_abi(Path(scratch) / "shared", args.sjasmplus, args.z80asm)
             assemble_shared_structures(Path(scratch) / "structures-shared", args.sjasmplus, args.z80asm)
+            assemble_origin(Path(scratch) / "origin", args.sjasmplus, args.z80asm)
             assemble_branch_limits(Path(scratch) / "branches", args.sjasmplus, args.z80asm)
             assemble_long_repeat(Path(scratch) / "long", args.sjasmplus, args.z80asm)
             assemble_field_address(Path(scratch) / "word", args.sjasmplus, args.z80asm)
