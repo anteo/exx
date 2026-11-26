@@ -1,0 +1,8 @@
+[tool.bumpversion]
+current_version = "0.1.0"
+parse = '^(?P<major>0|[1-9][0-9]*)\.(?P<minor>0|[1-9][0-9]*)\.(?P<patch>0|[1-9][0-9]*)$'
+
+[[tool.bumpversion.files]]
+filename = "../../exxlang/__init__.py"
+search = '__version__ = "{current_version}"'
+replace = '__version__ = "{new_version}"'

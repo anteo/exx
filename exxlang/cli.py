@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 from tempfile import NamedTemporaryFile
 
+from . import __version__
 from .compiler import compile_source
 from .diagnostics import ExxError
 from .registry import platforms, targets
@@ -28,6 +29,7 @@ def _write_output(output: Path, text: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Compile EXX procedures to assembly.")
+    parser.add_argument("--version", action="version", version=f"EXX {__version__}")
     parser.add_argument("source", type=Path, help="EXX source file")
     parser.add_argument("--target", required=True, choices=targets.names(), help="assembler dialect")
     parser.add_argument("--platform", choices=platforms.names(), help="CPU (default selected by target)")
