@@ -43,3 +43,9 @@ class BranchLayoutTests(unittest.TestCase):
         self.assertEqual(jumps(caller + "asm { nop }\ng() {}"), ["jp"])
         self.assertEqual(jumps("f(flag → Z) { if (flag) { asm { nop } }; return g() }\ng() {}"),
                          ["jp", "jr"])
+
+    def test_short_jump_layout_includes_static_data(self):
+        words = "".join(f"data word_{i}: u16 = 0\n" for i in range(63))
+        for byte_count, expected in ((1, "jr"), (2, "jp")):
+            extra = "".join(f"data byte_{i}: u8 = 0\n" for i in range(byte_count))
+            self.assertEqual(jumps("f() { return g() }\n" + words + extra + "g() {}"), [expected])

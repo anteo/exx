@@ -67,6 +67,9 @@ class Field:
 class DataSymbol:
     name: str
     line: int
+    type_name: str | None
+    initializer: Expr | None
+    start: int
 
 
 @dataclass(frozen=True)

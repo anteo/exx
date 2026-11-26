@@ -7,7 +7,7 @@ import operator
 from .diagnostics import ExxError
 from .flow import Flow
 from .parser import parse
-from .ir import Instruction, Operand, TargetError
+from .ir import Instruction, Operand, StaticData, TargetError
 from .registry import platforms
 from .syntax import Stmt
 
@@ -28,12 +28,13 @@ class Procedure:
 
 
 class CompiledModule(list[Procedure]):
-    """Procedures and the source comments that may also occur outside them."""
+    """Lowered procedures and other module items in source order."""
 
-    def __init__(self, procedures, comments, assembly):
+    def __init__(self, procedures, comments, assembly, data):
         super().__init__(procedures)
         self.comments = comments
         self.assembly = assembly
+        self.data = data
 
 
 @dataclass
@@ -63,6 +64,44 @@ def elements(expr):
     return expr.args if expr.kind == "tuple" else (expr,)
 
 
+def constant_operand(expr, width, resolve):
+    if expr.kind == "int":
+        return Operand("imm", str(expr.value))
+    if expr.kind == "unary" and expr.value in ("+", "-", "~"):
+        src = resolve(expr.args[0], width)
+        if src.kind != "imm":
+            return None
+        if expr.value == "+":
+            return src
+        mask = (1 << width) - 1 if width and expr.value == "~" else None
+        try:
+            value = int(src.text)
+        except ValueError:
+            text = f"({expr.value}{src.text})"
+            if mask is not None:
+                text = f"({text} & {mask})"
+        else:
+            value = ~value if expr.value == "~" else -value
+            text = str(value if mask is None else value & mask)
+        return Operand("imm", text, src.width)
+    if expr.kind == "binary" and expr.value in _BINARY:
+        shift = expr.value in ("<<", ">>")
+        left = resolve(expr.args[0], width)
+        right = resolve(expr.args[1], 0 if shift else width)
+        if left.kind != "imm" or right.kind != "imm":
+            return None
+        if shift and right.text.lstrip("-").isdecimal() and not 0 <= int(right.text) <= 255:
+            raise ExxError(expr.line, "constant shift count must be in 0..255")
+        try:
+            a, b = int(left.text), int(right.text)
+        except ValueError:
+            text = f"({left.text} {expr.value} {right.text})"
+        else:
+            text = str(_BINARY[expr.value](a, b))
+        return Operand("imm", text)
+    return None
+
+
 def validate_group(cpu, names, line, allow_group=False):
     used = set()
     for name in names:
@@ -84,8 +123,41 @@ def abi_key(cpu, proc):
 @dataclass
 class Declarations:
     procedures: dict = field(default_factory=dict)
-    data: set = field(default_factory=set)
+    data: dict = field(default_factory=dict)
     field_types: dict = field(default_factory=dict)
+
+    def data_address(self, symbol, externals):
+        if symbol.kind != "name" or symbol.value not in self.data:
+            raise ExxError(symbol.line, "address-of requires a declared data symbol")
+        declaration = self.data[symbol.value]
+        if declaration.initializer is None:
+            externals.add(symbol.value)
+        return Operand("imm", symbol.value, 16)
+
+
+def lower_data(symbol, declarations, cpu):
+    externals = set()
+    data_width = _SCALAR_WIDTHS[symbol.type_name]
+
+    def resolve(expr, width):
+        if expr.kind == "unary" and expr.value == "&":
+            if data_width != 16:
+                raise ExxError(expr.line, "a data address initializer requires u16")
+            return declarations.data_address(expr.args[0], externals)
+        if (expr.kind == "name" and expr.value.split(".")[0].isupper()
+                and expr.value not in declarations.data and not cpu.register(expr.value)
+                and expr.value not in cpu.unsupported_registers):
+            return Operand("imm", expr.value)
+        value = constant_operand(expr, width, resolve)
+        if value is None:
+            raise ExxError(expr.line, "a data initializer must be a constant or a data address")
+        return value
+
+    operand = resolve(symbol.initializer, data_width)
+    value = int(operand.text) if operand.text.lstrip("-").isdecimal() else None
+    if value is not None and not -(1 << (data_width - 1)) <= value < (1 << data_width):
+        raise ExxError(symbol.line, f"initializer for {symbol.name} does not fit in {data_width} bits")
+    return StaticData(symbol.name, data_width, operand.text, frozenset(externals), symbol.start)
 
 
 def collect_signatures(cpu, program, declarations, *, interface=False):
@@ -97,7 +169,17 @@ def collect_signatures(cpu, program, declarations, *, interface=False):
         if (name in found or name.lower().startswith("exx__") or cpu.register(name.upper())
                 or name.upper() in cpu.unsupported_registers):
             raise ExxError(symbol.line, f"invalid or conflicting data symbol {name}")
-        declarations.data.add(name)
+        if interface and symbol.initializer is not None:
+            raise ExxError(symbol.line, "a shared ABI file may only declare external data")
+        previous = declarations.data.get(name)
+        if previous is not None:
+            if previous.type_name and symbol.type_name and previous.type_name != symbol.type_name:
+                raise ExxError(symbol.line, f"conflicting data type for {name}")
+            if previous.initializer is not None and symbol.initializer is not None:
+                raise ExxError(symbol.line, f"duplicate definition of data {name}")
+            if previous.initializer is not None or (previous.type_name and symbol.initializer is None):
+                continue
+        declarations.data[name] = symbol
     for member in program.fields:
         previous = declarations.field_types.setdefault(member.name, member.type_name)
         if previous != member.type_name:
@@ -211,60 +293,30 @@ class Lowering:
                 return reg
             if expr.value in self.cpu.unsupported_registers:
                 raise ExxError(expr.line, f"unsupported {self.cpu.name.upper()} register {expr.value}")
-            if expr.value in self.declarations.data:
-                raise ExxError(expr.line, f"use &{expr.value} for the address of external data")
+            declaration = self.declarations.data.get(expr.value)
+            if declaration is not None:
+                if declaration.type_name is None:
+                    raise ExxError(expr.line, f"declare a type for data {expr.value} to access its value")
+                address = self.declarations.data_address(expr, self.externals)
+                return self.cpu.absolute_operand(address, _SCALAR_WIDTHS[declaration.type_name])
             # Constants and assembler structure offsets remain symbolic.
             if expr.value.split(".")[0].isupper():
                 return Operand("imm", expr.value)
             raise ExxError(expr.line, f"unknown name {expr.value}")
         if expr.kind == "assign":
             raise ExxError(expr.line, "parenthesized assignment requires a condition or arithmetic operand")
-        if expr.kind == "int":
-            return Operand("imm", str(expr.value))
         if expr.kind == "field":
             return self.field_operand(expr)
         if expr.kind == "unary" and expr.value == "&":
-            symbol, = expr.args
-            if symbol.kind != "name" or symbol.value not in self.declarations.data:
-                raise ExxError(expr.line, "address-of requires a declared external data symbol")
-            self.externals.add(symbol.value)
-            return Operand("imm", symbol.value, 16)
+            return self.declarations.data_address(expr.args[0], self.externals)
         if expr.kind == "index":
             base, offset = (self.operand(x) for x in expr.args)
             return self.cpu.indirect_operand(base, offset)
         if expr.kind == "unary" and expr.value == "*":
             return self.cpu.indirect_operand(self.operand(expr.args[0]))
-        if expr.kind == "unary" and expr.value in ("+", "-", "~"):
-            src = self.operand(expr.args[0], width)
-            if src.kind == "imm":
-                if expr.value == "+":
-                    return src
-                try:
-                    value = int(src.text)
-                except ValueError:
-                    text = f"({expr.value}{src.text})"
-                    if expr.value == "~" and width:
-                        text = f"({text} & {(1 << width) - 1})"
-                else:
-                    value = ~value if expr.value == "~" else -value
-                    if expr.value == "~" and width:
-                        value &= (1 << width) - 1
-                    text = str(value)
-                return Operand("imm", text)
-        if expr.kind == "binary" and expr.value in _BINARY:
-            left = self.operand(expr.args[0], width)
-            right = self.operand(expr.args[1], 0 if expr.value in ("<<", ">>") else width)
-            if left.kind == right.kind == "imm":
-                if (expr.value in ("<<", ">>") and right.text.lstrip("-").isdecimal()
-                        and not 0 <= int(right.text) <= 255):
-                    raise ExxError(expr.line, "constant shift count must be in 0..255")
-                try:
-                    a, b = int(left.text), int(right.text)
-                except ValueError:
-                    text = f"({left.text} {expr.value} {right.text})"
-                else:
-                    text = str(_BINARY[expr.value](a, b))
-                return Operand("imm", text)
+        value = constant_operand(expr, width, self.operand)
+        if value is not None:
+            return value
         raise ExxError(expr.line, "this expression needs an explicit destination register")
 
     def value_operand(self, expr, width=0, preserve=frozenset()):
@@ -587,7 +639,7 @@ class Lowering:
                          self.proc.start, self.proc.end)
 
 
-def compile_source(source: str, *, platform=None, interfaces=()) -> list[Procedure]:
+def compile_source(source: str, *, platform=None, interfaces=()) -> CompiledModule:
     cpu = platforms.create(platform)
     declared = Declarations()
     for path, declarations in interfaces:
@@ -599,8 +651,9 @@ def compile_source(source: str, *, platform=None, interfaces=()) -> list[Procedu
     comments = []
     program = parse(source, comments=comments)
     collect_signatures(cpu, program, declared)
+    data = tuple(lower_data(symbol, declared, cpu) for symbol in program.data if symbol.initializer is not None)
     module = CompiledModule((Lowering(proc, declared, cpu).finish() for proc in program.procs
-                             if proc.body is not None), comments, program.assembly)
+                             if proc.body is not None), comments, program.assembly, data)
     layout = getattr(cpu, "layout_module", None)
     if layout is not None:
         layout(module)

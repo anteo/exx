@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 
-from ..ir import Instruction
+from ..ir import Instruction, StaticData
 from ..syntax import AsmBlock
 
 
@@ -26,9 +26,12 @@ def _long_repeat(ins):
 def relax_branches(module):
     code = []
     bodies = []
-    for item in sorted([*module, *module.assembly], key=lambda item: item.start):
+    for item in sorted([*module, *module.assembly, *module.data], key=lambda item: item.start):
         if isinstance(item, AsmBlock):
             code.append(Instruction("asm"))
+            continue
+        if isinstance(item, StaticData):
+            code.append(Instruction("data", encoded_size=item.width // 8))
             continue
         code.append(Instruction("label", (item.name,)))
         start = len(code)

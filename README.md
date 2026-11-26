@@ -692,6 +692,44 @@ table_address:
     ret
 ```
 
+### Static data definitions
+
+Use `data` at file scope to define an initialized byte or word. Its
+initializer may be a constant expression or, for a word, a data address.
+The definition is emitted in source order in the selected section.
+Use `name` for the stored value and `&name` for its address.
+
+```text
+data cursor: u16 = 0x4000
+load_cursor() → HL { return cursor }
+```
+
+```asm
+cursor:
+    defw 16384
+
+load_cursor:
+    ld hl, (cursor)
+    ret
+```
+
+### Typed external data
+
+Declare the size of a symbol defined in another module to read or write
+its contents. On Z80, absolute byte loads and stores use A. Word loads and
+stores use a supported register pair.
+
+```text
+extern data status: u8
+set_status(value → A) { status = value }
+```
+
+```asm
+set_status:
+    ld (status), a
+    ret
+```
+
 ### Assembler constants
 
 Uppercase names and qualified offsets remain symbolic. The host assembler supplies their values

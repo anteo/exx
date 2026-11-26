@@ -15,6 +15,15 @@ class Operand:
 
 
 @dataclass(frozen=True)
+class StaticData:
+    name: str
+    width: int
+    initializer: str
+    externals: frozenset[str]
+    start: int
+
+
+@dataclass(frozen=True)
 class Transfer:
     """Ordered storage cells for a stack operation or simultaneous exchange."""
 

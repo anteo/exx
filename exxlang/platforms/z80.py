@@ -112,6 +112,10 @@ def indirect_operand(base, offset=None):
     return Operand("mem", f"{base.text} {displacement}", 8)
 
 
+def absolute_operand(address, width):
+    return Operand("mem", address.text, width)
+
+
 def _literal(text: str) -> int | None:
     try:
         return int(text, 0)
@@ -602,6 +606,7 @@ class Z80:
     resources = staticmethod(resources)
     field_operand = staticmethod(field_operand)
     indirect_operand = staticmethod(indirect_operand)
+    absolute_operand = staticmethod(absolute_operand)
     operand_reads = staticmethod(_reads)
     move = staticmethod(move)
     binary = staticmethod(binary)

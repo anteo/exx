@@ -15,11 +15,12 @@ class Z80Asm(Assembler):
     def header(self, procedures, section):
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", section):
             raise ValueError(f"invalid {self.name} section name {section!r}")
-        local = {proc.name for proc in procedures}
-        external = set().union(*(proc.externals for proc in procedures)) - local
-        self.symbols = {name: name for name in local | external}
+        items = [*procedures, *getattr(procedures, "data", ())]
+        local = dict.fromkeys(item.name for item in items)
+        external = set().union(*(item.externals for item in items)) - local.keys()
+        self.symbols = {name: name for name in (*local, *external)}
         return ["", f"    SECTION {section}",
-                *(f"    PUBLIC {proc.name}" for proc in procedures),
+                *(f"    PUBLIC {name}" for name in local),
                 *(f"    EXTERN {name}" for name in sorted(external))]
 
     def operands(self, items):

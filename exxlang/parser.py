@@ -89,10 +89,8 @@ class _Parser:
         while self.token.kind != "eof":
             line = self.token.line
             is_extern = self._accept("extern")
-            if is_extern and self.token.value == "data" and self.tokens[self.index + 1].kind == "name":
-                self._advance()
-                data.append(DataSymbol(self._expect_name().value, line))
-                self._expect_statement_end()
+            if self.token.value == "data" and self.tokens[self.index + 1].kind == "name":
+                data.append(self._data(is_extern))
             elif not is_extern and self.token.value == "field" and self.tokens[self.index + 1].kind == "name":
                 self._advance()
                 name = self._qualified_name()
@@ -107,6 +105,23 @@ class _Parser:
                 procs.append(self._procedure(is_extern, line))
             self._skip_separators()
         return Program(tuple(procs), tuple(data), tuple(fields), tuple(assembly))
+
+    def _data(self, is_extern):
+        start = self._expect("data")
+        name = self._expect_name()
+        type_name = None
+        if not is_extern or self.token.value == ":":
+            self._expect(":")
+            kind = self._expect_name()
+            if kind.value not in ("u8", "u16"):
+                raise ExxError(kind.line, "data type must be u8 or u16")
+            type_name = kind.value
+        initializer = None
+        if not is_extern:
+            self._expect("=")
+            initializer = self._expression()
+        self._expect_statement_end()
+        return DataSymbol(name.value, start.line, type_name, initializer, start.offset)
 
     def _assembly(self, *, file_scope=False):
         start = self._expect("asm")
