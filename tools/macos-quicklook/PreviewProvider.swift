@@ -22,7 +22,7 @@ private enum SourceHighlight {
     | (\b(?:extern|data|field|asm|clobbers|keep|if|else|while|repeat|break|goto|return|true|false|u8|u16)\b)
     | (\b(?:AF|BC|DE|HL|IX|IY|SP|AF_ALT|BC_ALT|DE_ALT|HL_ALT|CF|Z|PV|HF|N|S|[A-FHL])\b)
     | (\b(?:0[xX][0-9A-Fa-f]+|0[bB][01]+|[0-9]+)\b)
-    | (→|->)
+    | (→|->|\+\+|--)
     """#, options: .allowCommentsAndWhitespace)
 
     private static let styles = ["comment", "string", "keyword", "register", "number", "keyword"]

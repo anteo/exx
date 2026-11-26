@@ -19,7 +19,7 @@ exx__advance_block_2:
     jr z, exx__advance_block_3
     inc hl
     dec de
-    sub 1
+    dec a
     jr exx__advance_block_2
 exx__advance_block_3:
     ld a, b

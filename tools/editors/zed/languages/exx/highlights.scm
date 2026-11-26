@@ -8,7 +8,7 @@
 [ "if" "else" "while" "repeat" "break" "goto" "return" "keep"
   "extern" "data" "field" "clobbers" "asm" ] @keyword
 
-[ (arrow) (assignment_operator) "→" "->" "=" "+" "-" "*" "!" "~" "$"
+[ (arrow) (assignment_operator) (postfix_operator) "→" "->" "=" "++" "--" "+" "-" "*" "!" "~" "$"
   "&" "|" "^" "&&" "||" "<<" ">>" "==" "!=" "<" "<=" ">" ">=" ] @operator
 [ "(" ")" "[" "]" "{" "}" ] @punctuation.bracket
 [ "," "." ":" ";" ] @punctuation.delimiter

@@ -305,6 +305,8 @@ class Lowering:
             raise ExxError(expr.line, f"unknown name {expr.value}")
         if expr.kind == "assign":
             raise ExxError(expr.line, "parenthesized assignment requires a condition or arithmetic operand")
+        if expr.kind == "postfix_update":
+            raise ExxError(expr.line, "assign a postfix update to a separate register to use its old value")
         if expr.kind == "field":
             return self.field_operand(expr)
         if expr.kind == "unary" and expr.value == "&":
@@ -320,18 +322,30 @@ class Lowering:
         raise ExxError(expr.line, "this expression needs an explicit destination register")
 
     def value_operand(self, expr, width=0, preserve=frozenset()):
-        if expr.kind != "assign":
+        if expr.kind not in ("assign", "prefix_update"):
             return self.operand(expr, width)
-        target, rhs = expr.args
-        dst = self.operand(target)
-        if dst.kind != "reg":
-            raise ExxError(expr.line, "a nested assignment requires a register")
         start = len(self.steps)
-        self.assign(Stmt("assign", expr.line, rhs, target=target, op="="))
+        if expr.kind == "prefix_update":
+            dst = self.update_register(expr)
+            self.emit(self.cpu.step_register(dst, expr.value), expr.line)
+            operation = "register update"
+        else:
+            target, rhs = expr.args
+            dst = self.operand(target)
+            if dst.kind != "reg":
+                raise ExxError(expr.line, "a nested assignment requires a register")
+            self.assign(Stmt("assign", expr.line, rhs, target=target, op="="))
+            operation = "nested assignment"
         for step in self.steps[start:]:
             if preserve & (step.instruction.writes | step.instruction.invalidates | step.kills):
-                raise ExxError(expr.line, "nested assignment overwrites the left operand or destination address")
+                raise ExxError(expr.line, f"{operation} overwrites the left operand or destination address")
         return dst
+
+    def update_register(self, expr):
+        register = self.operand(expr.args[0])
+        if register.kind != "reg":
+            raise ExxError(expr.line, f"{expr.value} requires a register or register alias")
+        return register
 
     def target_code(self, instructions, line):
         for ins in instructions:
@@ -427,6 +441,11 @@ class Lowering:
         if stmt.op != "=":
             width = 0 if stmt.op in ("<<=", ">>=") else dst.width
             code = self.cpu.binary(dst, stmt.op, self.value_operand(rhs, width, self.cpu.operand_reads(dst)))
+        elif rhs.kind == "postfix_update":
+            src = self.update_register(rhs)
+            if dst.kind != "reg" or self.cpu.resources(dst.text) & self.cpu.resources(src.text):
+                raise ExxError(rhs.line, "a postfix update requires a separate register for its old value")
+            code = self.cpu.move(dst, src) + (self.cpu.step_register(src, rhs.value),)
         elif rhs.kind == "unary" and rhs.value == "~":
             src = self.value_operand(rhs.args[0], preserve=address_reads)
             code = (self.cpu.move(dst, self.operand(rhs, dst.width)) if src.kind == "imm"
@@ -545,6 +564,9 @@ class Lowering:
                 self.aliases[name] = (reg, self.layouts.get(reg))
         elif stmt.kind == "assign":
             self.assign(stmt)
+        elif stmt.kind in ("prefix_update", "postfix_update"):
+            dst = self.update_register(stmt.value)
+            self.emit(self.cpu.step_register(dst, stmt.value.value), stmt.line)
         elif stmt.kind == "label":
             self.mark(self.local_labels[stmt.value].symbol, stmt.line)
         elif stmt.kind == "goto":

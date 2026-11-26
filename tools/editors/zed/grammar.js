@@ -43,7 +43,7 @@ module.exports = grammar({
     _statement: $ => choice(
       $.if_statement, $.loop_statement, $.keep_statement, $.assembly,
       $.label, $.goto_statement, $.return_statement, 'break',
-      $.assignment, $.binding, prec(1, $.call),
+      $.assignment, $.binding, prec(1, choice($.call, $.prefix_update, $.postfix_update)),
     ),
     _body: $ => prec.right(choice($.block, seq($._statement, optional(';')))),
     if_statement: $ => prec.right(seq('if', '(', $._expression, ')', $._body,
@@ -59,7 +59,8 @@ module.exports = grammar({
     assignment_operator: _ => choice('=', '^=', '+=', '-=', '&=', '|=', '<<=', '>>='),
 
     _expression: $ => choice($.assignment_expression, $.binary_expression,
-      $.unary_expression, $.index_expression, $.bit_expression, $._atom),
+      $.unary_expression, $.prefix_update, $.postfix_update,
+      $.index_expression, $.bit_expression, $._atom),
     _atom: $ => choice($.identifier, $.qualified_name, $.access, $.call,
       $.number, $.boolean, $.tuple_or_group),
     tuple_or_group: $ => seq('(', commaSep($._expression), ')'),
@@ -68,6 +69,9 @@ module.exports = grammar({
       prec.left(index + 1, seq($._expression,
         operators.length === 1 ? operators[0] : choice(...operators), $._expression)))),
     unary_expression: $ => prec(10, seq(choice('!', '~', '+', '-', '*', '&'), $._expression)),
+    prefix_update: $ => prec(10, seq(choice('++', '--'), $._expression)),
+    postfix_update: $ => prec.left(13, seq($._expression, $.postfix_operator)),
+    postfix_operator: _ => token.immediate(/[ \t]*(\+\+|--)/),
     index_expression: $ => prec(11, seq($._expression, '[', $._expression, ']')),
     bit_expression: $ => prec(12, seq($._expression, '$', $._atom)),
     access: $ => seq(choice($.identifier, $.qualified_name), '->',

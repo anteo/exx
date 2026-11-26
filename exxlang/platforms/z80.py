@@ -303,6 +303,25 @@ def _alu_source(src: Operand) -> bool:
     return False
 
 
+def _inc_dec(dst: Operand, mnemonic: str) -> Instruction | None:
+    is_byte = dst.kind in ("reg", "mem") and _alu_source(dst)
+    is_word = dst.kind == "reg" and dst.text in LOAD_WORDS
+    if not (is_byte or is_word):
+        return None
+    writes = resources(dst.text) if dst.kind == "reg" else frozenset()
+    if is_byte:
+        writes |= FLAGS - {"CF"}
+    size = _byte_operand_size(dst) if is_byte else 1 + _index_prefix(dst.text)
+    return Instruction(mnemonic, (_text(dst),), _reads(dst), writes, encoded_size=size)
+
+
+def step_register(dst: Operand, op: str) -> Instruction:
+    instruction = _inc_dec(dst, "inc" if op == "++" else "dec")
+    if instruction is None:
+        raise TargetError(f"cannot apply {op} to {dst.text} on Z80")
+    return instruction
+
+
 def binary(dst: Operand, op: str, src: Operand) -> tuple[Instruction, ...]:
     op = op.removesuffix("=")
     if op in ("<<", ">>"):
@@ -313,15 +332,9 @@ def binary(dst: Operand, op: str, src: Operand) -> tuple[Instruction, ...]:
         reads = _reads(dst) | _reads(src)
         return (Instruction(alu[op], operands, reads, resources("A") | FLAGS, encoded_size=_byte_operand_size(src)),)
     if op in ("+", "-") and src.kind == "imm" and _literal(src.text) == 1:
-        inc_dec = "inc" if op == "+" else "dec"
-        is_byte = _alu_source(dst) and dst.kind in ("reg", "mem")
-        is_word = dst.kind == "reg" and dst.text in LOAD_WORDS
-        if is_byte or is_word:
-            writes = resources(dst.text) if dst.kind == "reg" else frozenset()
-            if is_byte:
-                writes |= FLAGS - {"CF"}
-            size = _byte_operand_size(dst) if is_byte else 1 + _index_prefix(dst.text)
-            return (Instruction(inc_dec, (_text(dst),), _reads(dst), writes, encoded_size=size),)
+        instruction = _inc_dec(dst, "inc" if op == "+" else "dec")
+        if instruction is not None:
+            return (instruction,)
     if op == "+" and dst.kind == src.kind == "reg" and dst.text in ("HL", "IX", "IY"):
         if src.text in ("BC", "DE", "SP", dst.text):
             reads = _reads(dst) | _reads(src)
@@ -610,6 +623,7 @@ class Z80:
     operand_reads = staticmethod(_reads)
     move = staticmethod(move)
     binary = staticmethod(binary)
+    step_register = staticmethod(step_register)
     bit_branch = staticmethod(bit_branch)
     bit_store = staticmethod(bit_store)
     complement = staticmethod(complement)

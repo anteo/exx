@@ -12,7 +12,7 @@ class TokenizerTests(unittest.TestCase):
         ])
 
     def test_multichar_operators_remain_single_tokens(self):
-        operators = ["→", "->", "==", "!=", "<=", ">=", "&&", "||", "+=", "-=", "^="]
+        operators = ["→", "->", "==", "!=", "<=", ">=", "&&", "||", "++", "--", "+=", "-=", "^="]
         self.assertEqual(tokenize(" ".join(operators)),
                          [Token("punct", op, 1) for op in operators] + [Token("eof", "", 1)])
 

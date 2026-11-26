@@ -16,8 +16,6 @@
 // Both dimensions must be nonzero. Carry is set when no scroll is needed.
 (CF, BC) zx__console_advance(cursor → BC, geometry → DE) clobbers(A, F) {
     (column, columns, rows) → (C, E, D)
-    column += 1
-    A = column
-    if (A < columns) return (CF, cursor)
+    if ((A = ++column) < columns) return (CF, cursor)
     return zx__console_newline(cursor, rows)
 }

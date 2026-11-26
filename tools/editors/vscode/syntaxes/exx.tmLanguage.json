@@ -26,7 +26,7 @@
         { "name": "entity.name.function.exx", "match": "\\b[a-zA-Z_]\\w*(?:\\.[a-zA-Z_]\\w*)*(?=[ \\t]*\\()" },
         { "name": "constant.other.symbol.exx", "match": "\\b[A-Z][A-Z0-9_]+\\b" },
         { "name": "constant.numeric.exx", "match": "\\b(?:0[xX][0-9a-fA-F]+|0[bB][01]+|[0-9]+)\\b" },
-        { "name": "keyword.operator.exx", "match": "→|->|<<=?|>>=?|&&|\\|\\||[=!<>+&|^\\-]=?|[~*$]" },
+        { "name": "keyword.operator.exx", "match": "→|->|\\+\\+|--|<<=?|>>=?|&&|\\|\\||[=!<>+&|^\\-]=?|[~*$]" },
         { "name": "punctuation.separator.exx", "match": "[.,:;]" }
       ]
     },

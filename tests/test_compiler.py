@@ -38,6 +38,45 @@ class CompilerTests(unittest.TestCase):
         with self.assertRaisesRegex(ExxError, "overwrites the left operand"):
             compile_text("pick(a → A, b → B) clobbers(A, F) { if (a == (a = b)) return }")
 
+    def test_prefix_and_postfix_updates_order_the_load_in_a_comparison(self):
+        for op, mnemonic in (("++", "inc"), ("--", "dec")):
+            for expr, prefix in ((f"{op}column", True), (f"column{op}", False)):
+                with self.subTest(expr=expr):
+                    proc, = compile_text(f"""
+                        (CF, BC) next(cursor → BC, columns → E) clobbers(A, F) {{
+                            column → C
+                            if ((A = {expr}) < columns) return (CF, cursor)
+                            column = 0
+                            return (CF, cursor)
+                        }}
+                    """)
+                    update = (mnemonic, ("c",))
+                    load = ("ld", ("a", "c"))
+                    expected = [update, load] if prefix else [load, update]
+                    self.assertEqual(instructions(proc)[:4], expected + [("cp", ("e",)), ("ret", ("c",))])
+
+    def test_updates_preserve_carry_and_handle_byte_and_word_registers(self):
+        proc, = compile_text("""
+            (A, HL, CF) step(byte → A, word → HL, carry → CF) clobbers(S, Z, HF, PV, N) {
+                ++byte
+                word--
+                return (byte, word, carry)
+            }
+        """)
+        self.assertEqual(instructions(proc), [("inc", ("a",)), ("dec", ("hl",)), ("ret", ())])
+
+    def test_updates_require_registers_and_preserve_live_operands(self):
+        for source, diagnostic in (
+            ("f() { ++1 }", "requires a register or register alias"),
+            ("f(p → HL) { (*p)++ }", "requires a register or register alias"),
+            ("A f(a → A) clobbers(F) { a = a++; return a }", "requires a separate register"),
+            ("f(a → A, b → B) clobbers(B, F) { if (a < b++) return }", "separate register"),
+            ("A f(a → A) clobbers(F) { a = a + ++a; return a }", "overwrites the left operand"),
+            ("f(a → A) clobbers(F) { ++a }", "clobber"),
+        ):
+            with self.subTest(source=source), self.assertRaisesRegex(ExxError, diagnostic):
+                compile_text(source)
+
     def test_arithmetic_assignments_use_the_explicit_registers(self):
         proc, = compile_text("""
             (IY, DE) adjust(base → IY) clobbers(CF, HF, N) {

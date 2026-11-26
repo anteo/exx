@@ -8,6 +8,7 @@ from .tokenizer import Token, tokenize
 
 
 _ASSIGN = frozenset({"=", "^=", "+=", "-=", "&=", "|=", "<<=", ">>="})
+_UPDATE = frozenset({"++", "--"})
 _PRECEDENCE = {
     "||": 1,
     "&&": 2,
@@ -259,10 +260,10 @@ class _Parser:
             value = self._expression()
             self._expect_statement_end()
             return Stmt("assign", token.line, value, target=target, op=operator)
-        if target.kind == "call":
+        if target.kind in ("call", "prefix_update", "postfix_update"):
             self._expect_statement_end()
-            return Stmt("call", token.line, target)
-        raise ExxError(token.line, "expected an assignment, binding, or procedure call")
+            return Stmt(target.kind, token.line, target)
+        raise ExxError(token.line, "expected an assignment, binding, register update, or procedure call")
 
     def _control(self) -> Stmt:
         token = self._advance()
@@ -292,6 +293,9 @@ class _Parser:
 
     def _primary(self) -> Expr:
         token = self.token
+        if token.value in _UPDATE:
+            self._advance()
+            return self._update("prefix_update", token, self._primary())
         if token.value in {"!", "~", "+", "-", "*", "&"}:
             self._advance()
             return Expr("unary", token.value, (self._primary(),), token.line)
@@ -302,8 +306,15 @@ class _Parser:
             value = Expr("index", None, (value, index), token.line)
         if self._accept("$"):
             index = self._atom()
-            return Expr("bit", None, (value, index), token.line)
+            value = Expr("bit", None, (value, index), token.line)
+        if self.token.value in _UPDATE:
+            return self._update("postfix_update", self._advance(), value)
         return value
+
+    def _update(self, kind, token, target):
+        if target.kind != "name":
+            raise ExxError(token.line, f"{token.value} requires a register or register alias")
+        return Expr(kind, token.value, (target,), token.line)
 
     def _atom(self) -> Expr:
         token = self.token

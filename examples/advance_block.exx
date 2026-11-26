@@ -6,9 +6,9 @@
     requested = A
 
     while (A) {
-        cursor += 1
-        remaining -= 1
-        A -= 1
+        ++cursor
+        --remaining
+        A--
     }
 
     return (requested, cursor, remaining)

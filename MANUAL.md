@@ -627,6 +627,80 @@ A = B + C
     add a, c
 ```
 
+### Prefix increment
+
+`++reg` increments a register or register alias in place and produces its new
+value. Use it on its own, in an assignment, or in a condition. The result wraps
+at the register's width. Byte `inc` updates the other arithmetic flags and
+preserves CF. Word `inc` preserves all flags.
+
+```text
+if ((A = ++column) < columns) return (CF, cursor)
+```
+
+```asm
+    inc c
+    ld a, c
+    cp e
+    ret c
+```
+
+Here `column` is C, `columns` is E, and `cursor` is BC. `cp e` sets the returned CF.
+
+### Prefix decrement
+
+`--reg` decrements a register or register alias in place and produces the new
+value. Byte `dec` preserves CF. Word `dec` preserves all flags.
+
+```text
+HL shorten(remaining → HL) {
+    --remaining
+    return remaining
+}
+```
+
+```asm
+shorten:
+    dec hl
+    ret
+```
+
+### Postfix increment
+
+`reg++` increments the register. To use the original value, assign it to a
+separate register of the same width. This also works inside a parenthesized
+assignment in a condition.
+
+```text
+if ((A = column++) < columns) return (CF, cursor)
+```
+
+```asm
+    ld a, c
+    inc c
+    cp e
+    ret c
+```
+
+### Postfix decrement
+
+`reg--` decrements the register. A standalone statement discards the original
+value. An assignment copies it to a separate register before decrementing.
+
+```text
+(A, B) take_count(count → B) clobbers(F) {
+    A = count--
+    return (A, count)
+}
+```
+
+```asm
+take_count:
+    ld a, b
+    dec b
+    ret
+```
+
 ### Assignment in arithmetic
 
 A parenthesized assignment writes the named register and uses that register
