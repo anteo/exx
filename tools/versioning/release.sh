@@ -28,6 +28,10 @@ require_tool() {
         fail "Cannot find '$1'. Install $2 or set $3 to its executable path."
 }
 
+require_clean_worktree() {
+    [ -z "$(git status --porcelain)" ] || fail 'Commit local changes before preparing the release.'
+}
+
 head=$(git rev-parse HEAD)
 lock=$(git rev-parse --git-common-dir)/exx-release.lock
 mkdir "$lock" || fail "Another EXX release is active or left files in $lock."
@@ -45,10 +49,9 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-[ -z "$(git status --porcelain)" ] || fail 'Commit local changes before preparing the release.'
-git ls-files --error-unmatch -- "$version_file" "$bump_config" "$changelog" >/dev/null
 case "$version" in
     patch|minor|major)
+        require_clean_worktree
         require_tool "$bump_my_version" bump-my-version BUMP_MY_VERSION
         version=$("$bump_my_version" show --config-file "$bump_config" \
             --increment "$version" new_version)
@@ -60,12 +63,16 @@ printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9]
 
 tag="v$version"
 ref="refs/tags/$tag"
+branch=$(git symbolic-ref -q HEAD) || fail 'Run the release command from a Git branch.'
+remote=$(git remote get-url --push origin) || fail 'Configure origin before publishing a release.'
 printf 'Release version %s\n' "$version"
 
 if git show-ref --verify --quiet "$ref"; then
     [ "$(git cat-file -t "$ref")" = tag ] || fail "$tag must be annotated."
     [ "$(git rev-parse "$ref^{commit}")" = "$head" ] || fail "$tag points to a different commit."
 else
+    require_clean_worktree
+    git ls-files --error-unmatch -- "$version_file" "$bump_config" "$changelog" >/dev/null
     require_tool "$bump_my_version" bump-my-version BUMP_MY_VERSION
     require_tool "$git_cliff" git-cliff GIT_CLIFF
     current=$("$bump_my_version" show --config-file "$bump_config" current_version)
@@ -94,4 +101,8 @@ git show "$commit:$changelog" | grep -Fxq "## $tag" || fail "HEAD must contain t
 if ! git show-ref --verify --quiet "$ref"; then
     git tag -a "$tag" -m "$tag" "$commit"
 fi
-printf 'Local release %s at %s\n' "$tag" "$commit"
+[ "$(git rev-parse "$ref^{commit}")" = "$commit" ] || fail "$tag points to a different commit."
+
+git push --atomic --no-follow-tags -- "$remote" "$commit:$branch" "$ref" ||
+    fail "Push failed. Retry with 'make release VERSION=$version'."
+printf 'Published %s at %s to origin\n' "$tag" "$commit"
