@@ -46,6 +46,13 @@ class Step:
     keep_live: frozenset = frozenset()
 
 
+@dataclass(frozen=True)
+class LocalLabel:
+    symbol: str
+    scope: tuple[int, ...]
+    keep_depth: int
+
+
 def parts(cpu, names):
     return frozenset().union(*(cpu.resources(name) for name in names))
 
@@ -136,6 +143,8 @@ class Lowering:
         self.position = proc.start
         self.loop_exits = []
         self.kept_words = []
+        self.local_labels = {}
+        self.scope = ()
         self.writable = parts(cpu, proc.outputs + proc.clobbers)
 
     def label(self):
@@ -147,6 +156,28 @@ class Lowering:
 
     def mark(self, label, line):
         self.emit(Instruction("label", (label,)), line)
+
+    def collect_labels(self, statements, scope=(), keep_depth=0):
+        scope += (id(statements),)
+        for stmt in statements:
+            if stmt.kind == "label":
+                if stmt.value in self.local_labels:
+                    raise ExxError(stmt.line, f"duplicate label {stmt.value}")
+                self.local_labels[stmt.value] = LocalLabel(self.label(), scope, keep_depth)
+            if stmt.body:
+                nested_depth = keep_depth + (len(stmt.value.args) if stmt.kind == "keep" else 0)
+                self.collect_labels(stmt.body, scope, nested_depth)
+            if stmt.otherwise:
+                self.collect_labels(stmt.otherwise, scope, keep_depth)
+
+    def goto(self, stmt):
+        label = self.local_labels.get(stmt.value)
+        if label is None:
+            raise ExxError(stmt.line, f"unknown label {stmt.value}")
+        if self.scope[:len(label.scope)] != label.scope:
+            raise ExxError(stmt.line, f"goto {stmt.value} cannot enter a nested or sibling block")
+        self.restore_kept(label.keep_depth, stmt.line)
+        self.emit(self.cpu.jump(label.symbol), stmt.line)
 
     def field_operand(self, expr):
         path = []
@@ -433,12 +464,14 @@ class Lowering:
     def block(self, statements):
         outer = self.aliases
         self.aliases = dict(outer)
+        self.scope += (id(statements),)
         for stmt in statements:
             try:
                 self.position = stmt.start
                 self.statement(stmt)
             except TargetError as error:
                 raise ExxError(stmt.line, str(error)) from error
+        self.scope = self.scope[:-1]
         self.aliases = outer
 
     def assembly(self, block):
@@ -460,6 +493,10 @@ class Lowering:
                 self.aliases[name] = (reg, self.layouts.get(reg))
         elif stmt.kind == "assign":
             self.assign(stmt)
+        elif stmt.kind == "label":
+            self.mark(self.local_labels[stmt.value].symbol, stmt.line)
+        elif stmt.kind == "goto":
+            self.goto(stmt)
         elif stmt.kind == "asm":
             self.assembly(stmt.value)
         elif stmt.kind == "call":
@@ -507,6 +544,7 @@ class Lowering:
             raise ExxError(stmt.line, f"unsupported statement {stmt.kind!r}")
 
     def finish(self):
+        self.collect_labels(self.proc.body)
         self.block(self.proc.body)
         self.position = self.proc.end
         self.emit(Instruction("end"), self.proc.line)

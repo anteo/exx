@@ -562,6 +562,32 @@ exx__example_1:
 exx__example_2:
 ```
 
+### Local labels and goto
+
+Use a label and `goto` for a shared exit or a local back edge. A jump can
+stay in its block or go to an enclosing block in the same procedure.
+An exit restores the pairs in any `keep` blocks it leaves. EXX checks
+register availability and stack state at the destination.
+
+```text
+fallback(ready → Z) → A {
+    if (!ready) goto failed
+    return 1
+failed:
+    return 0
+}
+```
+
+```asm
+fallback:
+    jr nz, exx__fallback_1
+    ld a, 1
+    ret
+exx__fallback_1:
+    ld a, 0
+    ret
+```
+
 ## Memory and symbols
 
 ### Byte pointers

@@ -555,7 +555,7 @@ def compact(code: list[Instruction]) -> tuple[Instruction, ...]:
             if (candidate.mnemonic == "ret" and not candidate.operands
                     or candidate.mnemonic == "call" and len(candidate.operands) == 1
                     or candidate.mnemonic == "jp" and len(candidate.operands) == 1
-                    and candidate.branch_target is None and not candidate.falls_through):
+                    and candidate.operands != instruction.operands[1:] and not candidate.falls_through):
                 action = candidate
                 next_index += 1
 

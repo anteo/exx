@@ -63,6 +63,52 @@ class CompilerTests(unittest.TestCase):
             with self.subTest(source=source), self.assertRaisesRegex(ExxError, "overwrites the left operand"):
                 compile_text(source)
 
+    def test_forward_and_backward_goto_use_local_branches(self):
+        proc, = compile_text("""
+            f(ready → Z) → A {
+            again:
+                if (ready) goto again
+                goto done
+                A = 2
+            done:
+                return 1
+            }
+        """)
+        self.assertEqual(instructions(proc), [
+            ("label", ("exx__f_1",)), ("jr", ("z", "exx__f_1")),
+            ("ld", ("a", "1")), ("ret", ()),
+        ])
+
+    def test_goto_unwinds_keep_blocks(self):
+        proc, = compile_text("""
+            f() {
+                keep(BC) {
+                    B = 1
+                    keep(DE) {
+                        D = 2
+                        goto done
+                    }
+                }
+            done:
+                return
+            }
+        """)
+        self.assertEqual(instructions(proc), [
+            ("push", ("bc",)), ("ld", ("b", "1")), ("push", ("de",)), ("ld", ("d", "2")),
+            ("pop", ("de",)), ("pop", ("bc",)), ("ret", ()),
+        ])
+
+    def test_goto_checks_scope_and_flow_at_its_target(self):
+        for source, diagnostic in (
+            ("f() { goto absent }\nabsent() {}", "unknown label"),
+            ("f() { here: here: return }", "duplicate label"),
+            ("f() { goto inside; keep(BC) { inside: B = 1 } }", "cannot enter"),
+            ("f(flag → CF) → A { if (flag) goto done; A = 1; done: return A }", "A unavailable"),
+            ("f(flag → CF) { if (flag) goto done; push(BC); done: return }", "different stack depths"),
+        ):
+            with self.subTest(source=source), self.assertRaisesRegex(ExxError, diagnostic):
+                compile_text(source)
+
     def test_assembler_expression_remains_an_immediate(self):
         proc, = compile_text("value() → A { return OFFSET + 1 }")
         self.assertEqual(instructions(proc)[0], ("ld", ("a", "0 + (OFFSET + 1)")))

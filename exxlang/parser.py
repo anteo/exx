@@ -202,6 +202,14 @@ class _Parser:
 
     def _statement_body(self) -> Stmt:
         token = self.token
+        if token.kind == "name" and self.tokens[self.index + 1].value == ":":
+            self._advance()
+            self._advance()
+            return Stmt("label", token.line, token.value)
+        if self._accept("goto"):
+            label = self._expect_name()
+            self._expect_statement_end()
+            return Stmt("goto", token.line, label.value)
         if token.value == "asm":
             return Stmt("asm", token.line, self._assembly())
         if token.value in {"if", "while", "repeat"}:

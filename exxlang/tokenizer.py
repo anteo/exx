@@ -22,7 +22,8 @@ _TOKEN = re.compile(
     r"|(?P<int>0[xX][0-9a-fA-F]+|0[bB][01]+|[0-9]+)"
     r"|(?P<punct><<=|>>=|<<|>>|->|→|\|\||&&|==|!=|<=|>=|[&|^+\-]=|[(){}\[\]*:;,!+\-.^<>=&|~$])"
 )
-_KEYWORDS = frozenset({"asm", "extern", "clobbers", "if", "else", "while", "repeat", "break", "return", "true", "false"})
+_KEYWORDS = frozenset({"asm", "extern", "clobbers", "if", "else", "while", "repeat", "break", "goto",
+                       "return", "true", "false"})
 
 # Braces inside assembler strings and comments are data. The apostrophe
 # in the Z80 register AF' is part of the register name.

@@ -27,7 +27,7 @@ class AsmBlock:
 class Stmt:
     kind: str
     line: int
-    value: Expr | AsmBlock | tuple[tuple[str, str], ...] | None = None
+    value: Expr | AsmBlock | str | tuple[tuple[str, str], ...] | None = None
     target: Expr | None = None
     body: tuple[Stmt, ...] = ()
     otherwise: tuple[Stmt, ...] = ()
