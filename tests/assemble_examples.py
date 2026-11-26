@@ -41,10 +41,13 @@ def run(command: list[str], directory: Path) -> None:
 
 def assemble(example: Path, target: str, assembler: str, directory: Path) -> bytes:
     directory.mkdir()
-    constants = VIDEO_CONSTANTS if example.stem == "video_plan_plane" else {}
-    if example.stem == "bit_operations":
-        constants = {"PACKET.status": 0, "PACKET.flags": 1}
+    constants = {
+        "video_plan_plane": VIDEO_CONSTANTS,
+        "bit_operations": {"PACKET.status": 0, "PACKET.flags": 1},
+        "buffer": {"DRV_HEADER.ops": 6, "DUO_TSCONF": 1},
+    }.get(example.stem, {})
     helpers = VIDEO_HELPERS if example.stem == "video_plan_plane" else ()
+    data = ("bs_storage_ops", "ts_storage_ops") if example.stem == "buffer" else ()
     command = [
         sys.executable, str(ROOT / "exx"), "--target", target,
         str(example), "-o", "generated.asm",
@@ -63,20 +66,47 @@ def assemble(example: Path, target: str, assembler: str, directory: Path) -> byt
 
     # Fixed-size stubs supply deterministic external addresses to both assemblers.
     stub_code = "".join(f"{name}:\n    ret\n" for name in helpers)
+    stub_code += "".join(f"{name}:\n    defb 0\n" for name in data)
     if target == "asm":
         wrapper = f'    ORG {ORIGIN}\n    INCLUDE "generated.asm"\n{stub_code}'
         (directory / "wrapper.asm").write_text(wrapper, encoding="ascii")
         run([assembler, "--nologo", "--raw=example.bin", "wrapper.asm"], directory)
     else:
         command = [assembler, "-b", f"-r={ORIGIN}", "-o=example.bin", "generated.asm"]
-        if helpers:
-            symbols = "".join(f"    PUBLIC {name}\n" for name in helpers)
+        if helpers or data:
+            symbols = "".join(f"    PUBLIC {name}\n" for name in (*helpers, *data))
             (directory / "helpers.asm").write_text(
                 f"    SECTION code_user\n{symbols}{stub_code}", encoding="ascii",
             )
             command.append("helpers.asm")
         run(command, directory)
     return (directory / "example.bin").read_bytes()
+
+
+def assemble_long_repeat(directory: Path, sjasmplus: str, z80asm: str) -> None:
+    directory.mkdir()
+    source = directory / "long_repeat.exx"
+    source.write_text("walk(p → HL, n → B) clobbers(HL, B) {repeat(n) {\n" +
+                      "p += 1\n" * 130 + "}}\n", encoding="utf-8")
+    # At $8082 DJNZ reaches the backward JP. Falling through jumps to RET at $808A.
+    expected = bytes([0x23]) * 130 + bytes.fromhex("10 03 c3 8a 80 c3 00 80 c9")
+    for target, tool in (("asm", sjasmplus), ("z80asm", z80asm)):
+        if assemble(source, target, tool, directory / target) != expected:
+            raise RuntimeError(f"{target}: incorrect long repeat branch encoding")
+    print("long repeat: both assemblers produced the expected back edge and exit")
+
+
+def assemble_field_address(directory: Path, sjasmplus: str, z80asm: str) -> None:
+    directory.mkdir()
+    source = directory / "buffer.exx"
+    source.write_text("extern data bs_storage_ops\nfield DRV_HEADER.ops: u16\n"
+                      "install(h: DRV_HEADER → IY) { h->ops = &bs_storage_ops }\n", encoding="utf-8")
+    # The external data starts at $8009 after the two indexed stores and RET.
+    expected = bytes.fromhex("fd 36 06 09 fd 36 07 80 c9 00 00")
+    for target, tool in (("asm", sjasmplus), ("z80asm", z80asm)):
+        if assemble(source, target, tool, directory / target) != expected:
+            raise RuntimeError(f"{target}: incorrectly linked address in u16 field")
+    print("word field: both assemblers stored the expected relocated address")
 
 
 def assemble_shared_abi(directory: Path, sjasmplus: str, z80asm: str) -> None:
@@ -132,6 +162,8 @@ def main() -> int:
                     )
                 print(f"{example.name}: both assemblers produced the same {len(binary)} bytes")
             assemble_shared_abi(Path(scratch) / "shared", args.sjasmplus, args.z80asm)
+            assemble_long_repeat(Path(scratch) / "long", args.sjasmplus, args.z80asm)
+            assemble_field_address(Path(scratch) / "word", args.sjasmplus, args.z80asm)
     except (OSError, RuntimeError) as error:
         print(error, file=sys.stderr)
         return 1

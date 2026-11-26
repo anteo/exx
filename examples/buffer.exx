@@ -1,0 +1,24 @@
+extern data bs_storage_ops
+extern data ts_storage_ops
+field DRV_HEADER.ops: u16
+
+// Install the selected dispatch table in the mapped workspace.
+select_ops(config → A, header: DRV_HEADER → IY) clobbers(HL, F) {
+    HL = &bs_storage_ops
+    if (config == DUO_TSCONF) HL = &ts_storage_ops
+    header->ops = HL
+}
+
+// Copy up to B bytes, stopping before the first zero byte. B=0 means 256.
+copy_prefix(src → DE, dst → HL, count → B) clobbers(A, F, DE, HL, B) {
+    repeat (count) {
+        A = *src
+        if (!A) break
+        *dst = A
+        src += 1
+        dst += 1
+    }
+}
+
+// Return the byte immediately before the cursor.
+previous_byte(cursor → IX) → A { return cursor[-1] }

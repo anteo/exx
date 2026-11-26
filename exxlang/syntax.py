@@ -43,5 +43,20 @@ class Proc:
 
 
 @dataclass(frozen=True)
+class Field:
+    name: str
+    width: int
+    line: int
+
+
+@dataclass(frozen=True)
+class DataSymbol:
+    name: str
+    line: int
+
+
+@dataclass(frozen=True)
 class Program:
     procs: tuple[Proc, ...]
+    data: tuple[DataSymbol, ...] = ()
+    fields: tuple[Field, ...] = ()

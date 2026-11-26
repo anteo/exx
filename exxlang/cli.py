@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target", required=True, choices=targets.names(), help="assembler dialect")
     parser.add_argument("--platform", choices=platforms.names(), help="CPU (default selected by target)")
     parser.add_argument("--abi", type=Path, action="append", default=[], metavar="FILE",
-                        help="shared EXX extern declarations (repeatable)")
+                        help="shared EXX procedure, data and field declarations (repeatable)")
     parser.add_argument("-o", "--output", type=Path, help="output file (default: stdout)")
     parser.add_argument("--section", default="code_user", help="section for z80asm output")
     parser.add_argument("--include", action="append", default=[], metavar="PATH",

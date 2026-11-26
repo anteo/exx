@@ -378,3 +378,142 @@ sbc(A, E)
 ```asm
     sbc a, e
 ```
+
+### Counted loops
+
+`repeat` runs the body, then decrements B using `djnz`, preserving flags for the loop test. An
+initial zero gives 256 iterations if the body leaves B alone. For a potentially out-of-range
+back edge EXX uses a nearby `djnz` and absolute jumps.
+
+```text
+count → B
+count = 16
+repeat (count) {
+    *HL = A
+    HL += 1
+}
+```
+
+```asm
+    ld b, 16
+exx__example_1:
+    ld (hl), a
+    inc hl
+    djnz exx__example_1
+```
+
+### Early loop exit
+
+`break` exits the innermost `while` or `repeat`. Here a zero byte exits before either HL or B changes.
+
+```text
+repeat (B) {
+    if (!(A = *HL)) break
+    HL += 1
+}
+```
+
+```asm
+exx__example_1:
+    ld a, (hl)
+    or a
+    jp z, exx__example_2
+    inc hl
+    djnz exx__example_1
+exx__example_2:
+```
+
+## Memory and symbols
+
+### Byte pointers
+
+`*ptr` accesses the byte addressed by BC, DE, HL, IX or IY. Transfers through BC and DE require
+A. This copy emits `ld a,(de)` followed by `ld (hl),a`.
+
+```text
+(src, dst) → (DE, HL)
+A = *src
+*dst = A
+```
+
+```asm
+    ld a, (de)
+    ld (hl), a
+```
+
+### Indexed bytes
+
+An IX or IY pointer accepts a constant displacement from −128 to 127. The host assembler
+resolves symbolic offsets.
+
+```text
+previous(cursor → IX) → A { return cursor[-1] }
+```
+
+```asm
+previous:
+    ld a, (ix - 1)
+    ret
+```
+
+### Typed structure fields
+
+A layout name supplies the offset prefix and is checked even when the pointer is passed by
+register or alias. A byte load below uses `VID_CTX.config` for `asm` and `VID_CTX_config` for
+`z80asm`. The caller supplies the actual address.
+
+```text
+config(ctx: VID_CTX → IY) → A { return ctx->config }
+```
+
+```asm
+config:
+    ld a, (iy + VID_CTX.config)
+    ret
+```
+
+### Word fields
+
+Fields default to `u8`. Declare `u16` to read or write two bytes, low byte first. Both offsets
+must fit the index range. BC, DE and HL can hold the word. Stores also accept constants.
+
+```text
+field DRV_HEADER.ops: u16
+install(h: DRV_HEADER → IY, table → HL) { h->ops = table }
+```
+
+```asm
+install:
+    ld (iy + DRV_HEADER.ops), l
+    ld (iy + DRV_HEADER.ops + 1), h
+    ret
+```
+
+### External data addresses
+
+Declare an assembly data symbol with `extern data` and take its address with `&`. The `z80asm`
+target emits `EXTERN` for referenced data.
+
+```text
+extern data bs_storage_ops
+table_address() → HL { return &bs_storage_ops }
+```
+
+```asm
+table_address:
+    ld hl, bs_storage_ops
+    ret
+```
+
+### Assembler constants
+
+Uppercase names and qualified offsets remain symbolic. The host assembler supplies their values
+and bank addresses.
+
+```text
+A = VID_CTX.slot0 ^ VID_CTX.slot1
+```
+
+```asm
+    ld a, 0 + (VID_CTX.slot0 ^ VID_CTX.slot1)
+```

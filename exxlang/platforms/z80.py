@@ -64,10 +64,24 @@ def supports_layout(reg: str) -> bool:
     return reg in INDEX_REGISTERS
 
 
-def field_operand(reg: str, layout: str, field: str) -> Operand:
+def field_operand(reg: str, layout: str, field: str, width: int = 8) -> Operand:
     if not supports_layout(reg):
         raise TargetError(f"{reg} cannot address a structure field on Z80")
-    return Operand("mem", f"{reg} + {layout}.{field}", 8)
+    return Operand("mem", f"{reg} + {layout}.{field}", width)
+
+
+def indirect_operand(base, offset=None):
+    if base.kind != "reg" or base.text not in ("BC", "DE", "HL", "IX", "IY"):
+        raise TargetError("byte dereference requires BC, DE, HL, IX or IY")
+    if offset is None:
+        return Operand("mem", base.text, 8)
+    if base.text not in INDEX_REGISTERS or offset.kind != "imm":
+        raise TargetError("indexed access requires IX or IY and a constant displacement")
+    value = _literal(offset.text)
+    if value is not None and not -128 <= value <= 127:
+        raise TargetError(f"invalid Z80 index displacement {value}")
+    displacement = f"- {-value}" if value is not None and value < 0 else f"+ {offset.text}"
+    return Operand("mem", f"{base.text} {displacement}", 8)
 
 
 def _literal(text: str) -> int | None:
@@ -115,6 +129,8 @@ def _reads(operand: Operand) -> frozenset[str]:
 
 
 def _validate_immediate(operand: Operand, width: int) -> None:
+    if operand.width > width:
+        raise TargetError(f"{operand.text} does not fit in {width} bits")
     value = _literal(operand.text)
     if value is not None and not -(1 << (width - 1)) <= value < 1 << width:
         raise TargetError(f"immediate {operand.text} does not fit in {width} bits")
@@ -154,7 +170,29 @@ def _word_load(dst: Operand, src: Operand) -> bool:
     return False
 
 
+def _field_word_move(dst, src):
+    store = dst.kind == "mem"
+    memory, value = (dst, src) if store else (src, dst)
+    low = Operand("mem", memory.text, 8)
+    high = Operand("mem", memory.text + " + 1", 8)
+    if value.kind == "reg" and value.text in ("BC", "DE", "HL"):
+        lo, hi = register(value.text[1]), register(value.text[0])
+    elif store and value.kind == "imm":
+        _validate_immediate(value, 16)
+        number = _literal(value.text)
+        lo = Operand("imm", str(number & 255) if number is not None else f"(({value.text}) & 255)")
+        hi = Operand("imm", str((number >> 8) & 255) if number is not None else f"((({value.text}) >> 8) & 255)")
+    else:
+        raise TargetError("u16 indexed fields require BC, DE or HL, or a constant to store")
+    if store:
+        return _ld(low, lo) + _ld(high, hi)
+    return _ld(lo, low) + _ld(hi, high)
+
+
 def move(dst: Operand, src: Operand) -> tuple[Instruction, ...]:
+    for operand in (dst, src):
+        if operand.kind == "mem" and operand.width == 16 and _indirect(operand)[0] in INDEX_REGISTERS:
+            return _field_word_move(dst, src)
     if dst == src and dst.kind in ("reg", "flag"):
         return ()
     if dst.kind == "flag":
@@ -306,6 +344,12 @@ def jump(label: str) -> Instruction:
     return Instruction("jp", (label,), branch_target=label, falls_through=False)
 
 
+def repeat_branch(counter, label):
+    if counter != register("B"):
+        raise TargetError("repeat requires B or an alias bound to B")
+    return Instruction("djnz", (label,), resources("B"), resources("B"), branch_target=label)
+
+
 def branch(
     left: Operand,
     relation: str | None,
@@ -344,6 +388,31 @@ def branch(
         skip = new_label()
         return compare, _jump("c", skip), _jump("nz", label), Instruction("label", (skip,))
     return compare, _jump(COMPARISONS[relation], label)
+
+
+def _relax_repeat_edges(code):
+    # DJNZ is PC-relative. Bound distances in emitted order so widening an
+    # inner loop is reflected in the distance for every enclosing loop.
+    labels = {}
+    position = 0
+    for ins in code:
+        if ins.mnemonic == "label":
+            labels[ins.operands[0]] = position
+        elif ins.mnemonic == "djnz":
+            target = ins.branch_target
+            if position + 2 - labels[target] > 128:
+                again, done = target + "_again", target + "_done"
+                yield Instruction("djnz", (again,), ins.reads, ins.writes, branch_target=again)
+                yield jump(done)
+                yield Instruction("label", (again,))
+                yield jump(target)
+                yield Instruction("label", (done,))
+                position += 8
+                continue
+            position += 2
+        else:
+            position += 4  # Maximum encoded length of one instruction selected here.
+        yield ins
 
 
 def compact(code: list[Instruction]) -> tuple[Instruction, ...]:
@@ -390,13 +459,13 @@ def compact(code: list[Instruction]) -> tuple[Instruction, ...]:
         for operand in instruction.operands
         for name in re.findall(r"\bexx__\w+", operand, re.IGNORECASE)
     }
-    return tuple(
+    return tuple(_relax_repeat_edges(
         instruction
         for instruction in compacted
         if instruction.mnemonic != "label"
         or not instruction.operands[0].lower().startswith("exx__")
         or instruction.operands[0].lower() in referenced
-    )
+    ))
 
 
 @platforms.register
@@ -408,6 +477,7 @@ class Z80:
     register = staticmethod(register)
     resources = staticmethod(resources)
     field_operand = staticmethod(field_operand)
+    indirect_operand = staticmethod(indirect_operand)
     operand_reads = staticmethod(_reads)
     move = staticmethod(move)
     binary = staticmethod(binary)
@@ -418,6 +488,7 @@ class Z80:
     update_intrinsic = staticmethod(update_intrinsic)
     branch = staticmethod(branch)
     jump = staticmethod(jump)
+    repeat_branch = staticmethod(repeat_branch)
     constant_return = staticmethod(constant_return)
     compact = staticmethod(compact)
 

@@ -19,9 +19,9 @@ _TOKEN = re.compile(
     r"|(?P<comment>//[^\r\n]*|/\*[\s\S]*?\*/)"
     r"|(?P<name>[a-zA-Z_][a-zA-Z_0-9]*)"
     r"|(?P<int>0[xX][0-9a-fA-F]+|0[bB][01]+|[0-9]+)"
-    r"|(?P<punct><<=|>>=|<<|>>|->|→|\|\||&&|==|!=|<=|>=|[&|^+\-]=|[(){}:;,!+\-.^<>=&|~$])"
+    r"|(?P<punct><<=|>>=|<<|>>|->|→|\|\||&&|==|!=|<=|>=|[&|^+\-]=|[(){}\[\]*:;,!+\-.^<>=&|~$])"
 )
-_KEYWORDS = frozenset({"extern", "clobbers", "if", "else", "while", "return", "true", "false"})
+_KEYWORDS = frozenset({"extern", "clobbers", "if", "else", "while", "repeat", "break", "return", "true", "false"})
 
 
 def tokenize(source: str) -> list[Token]:
@@ -44,9 +44,9 @@ def tokenize(source: str) -> list[Token]:
                 tokens.append(Token("newline", "\n", line))
             line += value.count("\n")
         elif kind != "space":
-            if value == "(":
+            if value in ("(", "["):
                 parentheses += 1
-            elif value == ")" and parentheses > 0:
+            elif value in (")", "]") and parentheses > 0:
                 parentheses -= 1
             if kind == "name" and value in _KEYWORDS:
                 kind = "keyword"

@@ -1,7 +1,7 @@
 """Parse the EXX token stream into a syntax tree."""
 
 from .diagnostics import ExxError
-from .syntax import Expr, Param, Proc, Program, Stmt
+from .syntax import DataSymbol, Expr, Field, Param, Proc, Program, Stmt
 from .tokenizer import Token, tokenize
 
 
@@ -80,15 +80,33 @@ class _Parser:
 
     def program(self) -> Program:
         procs = []
+        data = []
+        fields = []
         self._skip_separators()
         while self.token.kind != "eof":
-            procs.append(self._procedure())
+            line = self.token.line
+            is_extern = self._accept("extern")
+            if is_extern and self.token.value == "data" and self.tokens[self.index + 1].kind == "name":
+                self._advance()
+                data.append(DataSymbol(self._expect_name().value, line))
+                self._expect_statement_end()
+            elif not is_extern and self.token.value == "field" and self.tokens[self.index + 1].kind == "name":
+                self._advance()
+                name = self._qualified_name()
+                if "." not in name:
+                    raise ExxError(line, "field declaration requires Layout.member")
+                self._expect(":")
+                kind = self._expect_name().value
+                if kind not in ("u8", "u16"):
+                    raise ExxError(line, "field type must be u8 or u16")
+                fields.append(Field(name, 8 if kind == "u8" else 16, line))
+                self._expect_statement_end()
+            else:
+                procs.append(self._procedure(is_extern, line))
             self._skip_separators()
-        return Program(tuple(procs))
+        return Program(tuple(procs), tuple(data), tuple(fields))
 
-    def _procedure(self) -> Proc:
-        line = self.token.line
-        is_extern = self._accept("extern")
+    def _procedure(self, is_extern: bool, line: int) -> Proc:
         name = self._expect_name().value
         self._expect("(")
         params = []
@@ -155,8 +173,11 @@ class _Parser:
 
     def _statement(self) -> Stmt:
         token = self.token
-        if token.value in {"if", "while"}:
+        if token.value in {"if", "while", "repeat"}:
             return self._control()
+        if self._accept("break"):
+            self._expect_statement_end()
+            return Stmt("break", token.line)
         if self._accept("return"):
             result = None
             if self.token.kind not in {"newline", "eof"} and self.token.value not in {"}", ";"}:
@@ -209,10 +230,14 @@ class _Parser:
 
     def _primary(self) -> Expr:
         token = self.token
-        if token.value in {"!", "~", "+", "-"}:
+        if token.value in {"!", "~", "+", "-", "*", "&"}:
             self._advance()
             return Expr("unary", token.value, (self._primary(),), token.line)
         value = self._atom()
+        while self._accept("["):
+            index = self._expression()
+            self._expect("]")
+            value = Expr("index", None, (value, index), token.line)
         if self._accept("$"):
             index = self._atom()
             return Expr("bit", None, (value, index), token.line)

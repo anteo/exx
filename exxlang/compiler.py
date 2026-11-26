@@ -1,7 +1,7 @@
 """Register contracts, structured control flow and platform lowering for EXX."""
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import operator
 
 from .diagnostics import ExxError
@@ -58,10 +58,30 @@ def abi_key(cpu, proc):
     return inputs, proc.outputs, parts(cpu, proc.clobbers) - parts(cpu, proc.outputs)
 
 
-def collect_signatures(cpu, program, found, *, interface=False):
+@dataclass
+class Declarations:
+    procedures: dict = field(default_factory=dict)
+    data: set = field(default_factory=set)
+    field_widths: dict = field(default_factory=dict)
+
+
+def collect_signatures(cpu, program, declarations, *, interface=False):
+    found = declarations.procedures
+    for symbol in program.data:
+        name = symbol.name
+        if (name in found or name.lower().startswith("exx__") or cpu.register(name.upper())
+                or name.upper() in cpu.unsupported_registers):
+            raise ExxError(symbol.line, f"invalid or conflicting data symbol {name}")
+        declarations.data.add(name)
+    for member in program.fields:
+        previous = declarations.field_widths.setdefault(member.name, member.width)
+        if previous != member.width:
+            raise ExxError(member.line, f"conflicting field width for {member.name}")
     for proc in program.procs:
+        if proc.name in declarations.data:
+            raise ExxError(proc.line, f"{proc.name} is declared as data")
         if interface and proc.body is not None:
-            raise ExxError(proc.line, "a shared ABI file may only contain extern declarations")
+            raise ExxError(proc.line, "a shared ABI file may only contain extern declarations and field widths")
         if proc.name.lower().startswith("exx__"):
             raise ExxError(proc.line, "the exx__ prefix is reserved for generated labels")
         validate_group(cpu, (p.register for p in proc.params), proc.line)
@@ -85,15 +105,17 @@ def collect_signatures(cpu, program, found, *, interface=False):
 
 
 class Lowering:
-    def __init__(self, proc, symbols, cpu):
+    def __init__(self, proc, declarations, cpu):
         self.cpu = cpu
         self.proc = proc
-        self.symbols = symbols
+        self.declarations = declarations
+        self.symbols = declarations.procedures
         self.aliases = {p.name: (p.register, p.type_name) for p in proc.params}
         self.layouts = {p.register: p.type_name for p in proc.params if p.type_name}
         self.steps = []
         self.externals = set()
         self.counter = 0
+        self.loop_exits = []
         self.writable = parts(cpu, proc.outputs + proc.clobbers)
 
     def label(self):
@@ -115,6 +137,8 @@ class Lowering:
                 return reg
             if expr.value in self.cpu.unsupported_registers:
                 raise ExxError(expr.line, f"unsupported {self.cpu.name.upper()} register {expr.value}")
+            if expr.value in self.declarations.data:
+                raise ExxError(expr.line, f"use &{expr.value} for the address of external data")
             # Constants and assembler structure offsets remain symbolic.
             if expr.value.split(".")[0].isupper():
                 return Operand("imm", expr.value)
@@ -128,8 +152,20 @@ class Lowering:
             if base.kind == "name" and base.value in self.aliases:
                 reg, layout = self.aliases[base.value]
                 if layout:
-                    return self.cpu.field_operand(reg, layout, expr.value)
+                    bits = self.declarations.field_widths.get(f"{layout}.{expr.value}", 8)
+                    return self.cpu.field_operand(reg, layout, expr.value, bits)
             raise ExxError(expr.line, "field access requires a typed " + " or ".join(self.cpu.layout_registers) + " binding")
+        if expr.kind == "unary" and expr.value == "&":
+            symbol, = expr.args
+            if symbol.kind != "name" or symbol.value not in self.declarations.data:
+                raise ExxError(expr.line, "address-of requires a declared external data symbol")
+            self.externals.add(symbol.value)
+            return Operand("imm", symbol.value, 16)
+        if expr.kind == "index":
+            base, offset = (self.operand(x) for x in expr.args)
+            return self.cpu.indirect_operand(base, offset)
+        if expr.kind == "unary" and expr.value == "*":
+            return self.cpu.indirect_operand(self.operand(expr.args[0]))
         if expr.kind == "unary" and expr.value in ("+", "-", "~"):
             src = self.operand(expr.args[0], width)
             if src.kind == "imm":
@@ -341,6 +377,10 @@ class Lowering:
         elif stmt.kind == "return":
             self.returns(stmt)
         elif stmt.kind == "if":
+            if (self.loop_exits and not stmt.otherwise and len(stmt.body) == 1
+                    and stmt.body[0].kind == "break"):
+                self.condition(stmt.value, self.loop_exits[-1], True)
+                return
             end = self.label()
             alt = self.label() if stmt.otherwise else end
             self.condition(stmt.value, alt, False)
@@ -350,12 +390,23 @@ class Lowering:
                 self.mark(alt, stmt.line)
                 self.block(stmt.otherwise)
             self.mark(end, stmt.line)
-        elif stmt.kind == "while":
+        elif stmt.kind == "break":
+            if not self.loop_exits:
+                raise ExxError(stmt.line, "break requires an enclosing loop")
+            end = self.loop_exits[-1]
+            self.emit(self.cpu.jump(end), stmt.line)
+        elif stmt.kind in ("while", "repeat"):
             start, end = self.label(), self.label()
             self.mark(start, stmt.line)
-            self.condition(stmt.value, end, False)
+            if stmt.kind == "while":
+                self.condition(stmt.value, end, False)
+                back_edge = self.cpu.jump(start)
+            else:
+                back_edge = self.cpu.repeat_branch(self.operand(stmt.value), start)
+            self.loop_exits.append(end)
             self.block(stmt.body)
-            self.emit(self.cpu.jump(start), stmt.line)
+            self.loop_exits.pop()
+            self.emit(back_edge, stmt.line)
             self.mark(end, stmt.line)
         else:
             raise ExxError(stmt.line, f"unsupported statement {stmt.kind!r}")
@@ -405,7 +456,7 @@ class Lowering:
 
 def compile_source(source: str, *, platform=None, interfaces=()) -> list[Procedure]:
     cpu = platforms.create(platform)
-    declared = {}
+    declared = Declarations()
     for path, declarations in interfaces:
         try:
             collect_signatures(cpu, parse(declarations), declared, interface=True)
