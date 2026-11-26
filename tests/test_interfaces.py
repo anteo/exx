@@ -21,9 +21,11 @@ class InterfaceTests(unittest.TestCase):
         for signature in ("arg: OTHER → IX", "arg: CTX → IY"):
             with self.subTest(signature=signature), self.assertRaisesRegex(ExxError, "incompatible ABI"):
                 compile_source(f"(A, HL) read({signature}) clobbers(DE) {{}}", interfaces=self.interface)
-        for result in ("(HL, A) clobbers(DE)", "(A, HL) clobbers(D)"):
-            with self.subTest(result=result), self.assertRaisesRegex(ExxError, "incompatible ABI"):
-                compile_source(f"read(arg: CTX → IX) → {result} {{}}", interfaces=self.interface)
+        for results, clobbers in (("(HL, A)", "DE"), ("(A, HL)", "D")):
+            with self.subTest(results=results, clobbers=clobbers):
+                with self.assertRaisesRegex(ExxError, "incompatible ABI"):
+                    compile_source(f"{results} read(arg: CTX → IX) clobbers({clobbers}) {{}}",
+                                   interfaces=self.interface)
 
     def test_layout_checks_apply_to_raw_register_and_local_alias(self):
         for layout in ("", ": OTHER"):
