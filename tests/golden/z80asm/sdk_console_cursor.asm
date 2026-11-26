@@ -4,20 +4,20 @@
     PUBLIC zx__console_newline
     PUBLIC zx__console_advance
 
-; From zxevo-sdk lib/common/src/console/z80/zx__console_newline.asm
-; and zx__console_advance.asm. The row and column counts are nonzero.
+; Move to the first column of the next row, staying at the bottom row.
+; Rows must be nonzero. Carry is set when the next row fits.
 zx__console_newline:
     ld c, 0
+    inc b
     ld a, b
-    add a, 1
     cp d
-    jr c, exx__zx__console_newline_1
-    ld a, d
-    sub 1
-exx__zx__console_newline_1:
-    ld b, a
+    ret c
+    ld b, d
+    dec b
     ret
 
+; Advance one cell and wrap at the right edge.
+; Both dimensions must be nonzero. Carry is set when no scroll is needed.
 zx__console_advance:
     inc c
     ld a, c

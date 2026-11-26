@@ -1,16 +1,16 @@
 // The caller supplies a resident VID_CTX and an open mapper in VID_SESSION.
 // Each helper is reachable in the current ROM bank. Its register ABI is
 // supplied here because the implementations are ordinary DuoConf assembly.
-extern video_window_matches(window → B, page → E, session: VID_SESSION → IX, context: VID_CTX → IY)
-    → (CF, Z, A) clobbers(C, D, HL, F)
-extern video_stack_safe(window → B, session: VID_SESSION → IX) → (CF, A) clobbers(C, HL, F)
-extern video_plane_conflict(slot → A, window → B, page → E, session: VID_SESSION → IX, context: VID_CTX → IY)
-    → Z clobbers(A, HL, F)
-extern video_unavailable() → (CF, A) clobbers(F)
+extern (CF, Z, A) video_window_matches(window → B, page → E, session: VID_SESSION → IX,
+    context: VID_CTX → IY) clobbers(C, D, HL, F)
+extern (CF, A) video_stack_safe(window → B, session: VID_SESSION → IX) clobbers(C, HL, F)
+extern Z video_plane_conflict(slot → A, window → B, page → E, session: VID_SESSION → IX,
+    context: VID_CTX → IY) clobbers(A, HL, F)
+extern (CF, A) video_unavailable() clobbers(F)
 
 // CF set: A is the error. CF clear: A selects keep (0) or install (1).
-video_plan_plane(window → B, page → E, session: VID_SESSION → IX, context: VID_CTX → IY)
-    → (CF, A) clobbers(C, D, HL, F) {
+(CF, A) video_plan_plane(window → B, page → E, session: VID_SESSION → IX,
+    context: VID_CTX → IY) clobbers(C, D, HL, F) {
     if ((A = window) == RST8_VID_NO_WINDOW) return (0, 0)
     (CF, Z, A) = video_window_matches(window, page, session, context)
     if (CF) return (CF, A)

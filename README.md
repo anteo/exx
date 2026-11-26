@@ -14,7 +14,7 @@ Return the smaller of two unsigned bytes. The inputs arrive in A and B,
 the result returns in A, and the comparison changes the flags in F.
 
 ```text
-minimum(value → A, limit → B) → A clobbers(F) {
+A minimum(value → A, limit → B) clobbers(F) {
     if (value < limit) return value
     return limit
 }
@@ -95,9 +95,9 @@ implementations must honour their declarations.
 ./exx --target z80asm --abi video.abi caller.exx -o caller.asm
 ```
 
-For example, put `extern read_page(page → E) → A` in `video.abi`. With
-`read_page(page → E) → A { return page }` in `video.exx` and
-`fetch_page(page → E) → A { return read_page(page) }` in `caller.exx`, the two modules use the same symbol.
+For example, put `extern A read_page(page → E)` in `video.abi`. With
+`A read_page(page → E) { return page }` in `video.exx` and
+`A fetch_page(page → E) { return read_page(page) }` in `caller.exx`, the two modules use the same symbol.
 
 ```asm
 ; video.asm

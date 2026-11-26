@@ -9,7 +9,7 @@ class DataTests(unittest.TestCase):
     def test_data_definitions_share_source_order_with_procedures(self):
         module = compile_source("""// Initial screen pointer.
 data cursor: u16 = 0x4000
-read_cursor() → HL { return cursor }
+HL read_cursor() { return cursor }
 data status: u8 = 1 << 2
 write_status(value → A) { status = value }
 """)
@@ -31,8 +31,8 @@ write_status(value → A) { status = value }
         abi = [("data.abi", "extern data counter: u16")]
         module = compile_source("""
 data counter_ptr: u16 = &counter
-get() → DE { return counter }
-address() → HL { return &counter }
+DE get() { return counter }
+HL address() { return &counter }
 """, interfaces=abi)
         output = emit(module, "z80asm")
         self.assertEqual(output.count("    EXTERN counter\n"), 1)
@@ -50,7 +50,7 @@ address() → HL { return &counter }
             ("extern data other\ndata count: u8 = &other + 1", "requires u16"),
             ("data count: u16 = 1\ndata count: u16 = 2", "duplicate definition"),
             ("extern data count: u8\ndata count: u16 = 1", "conflicting data type"),
-            ("extern data count\nf() → A { return count }", "declare a type"),
+            ("extern data count\nA f() { return count }", "declare a type"),
         ):
             with self.subTest(source=source), self.assertRaisesRegex(ExxError, diagnostic):
                 compile_source(source)

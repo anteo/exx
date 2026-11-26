@@ -1,7 +1,6 @@
 // Move by at most limit bytes. The caller supplies limit <= remaining.
 // Return the distance in A, the new cursor in HL and the new count in DE.
-advance_block(requested → B, limit → C, cursor → HL, remaining → DE)
-    → (A, HL, DE) clobbers(B, F) {
+(A, HL, DE) advance_block(requested → B, limit → C, cursor → HL, remaining → DE) clobbers(B, F) {
     A = requested
     if (A > limit) A = limit
     requested = A
@@ -16,7 +15,7 @@ advance_block(requested → B, limit → C, cursor → HL, remaining → DE)
 }
 
 // Move by at most four bytes within an eight-byte block.
-advance_block_demo(cursor → HL) → (A, HL, DE) clobbers(B, C, F) {
+(A, HL, DE) advance_block_demo(cursor → HL) clobbers(B, C, F) {
     B = 4
     C = 8
     DE = 8

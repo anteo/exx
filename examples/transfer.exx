@@ -15,7 +15,7 @@ set_alt_pointer(pointer → HL) clobbers(HL_ALT) {
 }
 
 // Replace the port byte and return the value read before the write.
-replace_port_byte(port → BC, value → E) → A clobbers(S, Z, HF, PV, N) {
+A replace_port_byte(port → BC, value → E) clobbers(S, Z, HF, PV, N) {
     A = in(port)
     out(port, value)
     return A

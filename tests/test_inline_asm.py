@@ -21,13 +21,13 @@ class InlineAssemblyTests(unittest.TestCase):
         self.assertIn("only.label:", emit(compile_source("asm {only.label:}"), "z80asm"))
 
     def test_contract_uses_aliases_and_checks_reads_writes_and_flags(self):
-        source = ("f(value → A) → (A, CF) clobbers(F) {\n"
+        source = ("(A, CF) f(value → A) clobbers(F) {\n"
                   "asm(value) -> (value, CF) clobbers(F) {    rlca }\nreturn (value, CF) }")
         self.assertIn("    rlca \n    ret", emit(compile_source(source), "asm"))
         for source, message in (
             ("f() { asm(A) { nop } }", "A unavailable"),
             ("f() { asm() → B { ld b,0 } }", "undeclared clobber"),
-            ("f(b → B) → B { asm clobbers(B) { nop }; return b }", "B unavailable"),
+            ("B f(b → B) { asm clobbers(B) { nop }; return b }", "B unavailable"),
             ("f(b → BC) { asm(b, C) { nop } }", "overlapping"),
             ("f() { asm clobbers(SP) { nop } }", "reserved"),
             ("asm(A) { nop }", "file-scope"),

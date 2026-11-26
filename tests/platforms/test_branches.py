@@ -32,7 +32,7 @@ class BranchLayoutTests(unittest.TestCase):
         for flag in ("Z", "CF", "S", "PV"):
             for negate in ("", "!"):
                 with self.subTest(flag=flag, negate=negate):
-                    src = f"f(flag → {flag}) → A {{ if ({negate}flag) return 1; return 2 }}"
+                    src = f"A f(flag → {flag}) {{ if ({negate}flag) return 1; return 2 }}"
                     self.assertEqual(jumps(src), ["jr" if flag in ("Z", "CF") else "jp"])
 
     def test_module_boundaries_and_opaque_assembly(self):

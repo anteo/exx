@@ -15,12 +15,17 @@ In these fragments `session` is a `VID_SESSION` pointer in IX and `packet` is a 
 
 ### Register ABI
 
-```text
-extern video_stack_safe(window → B, session: VID_SESSION → IX)
-    → (CF, A) clobbers(C, HL, F)
+Write the result before the procedure name in definitions and `extern`
+declarations. Use a register or flag name for one result, as in `A read_byte()`,
+and a parenthesized list for multiple results, as in `(CF, A) probe()`. Start
+with the procedure name when it has no result, as in `reset()`. Parameter
+arrows bind arguments to registers. `clobbers(...)` describes the procedure's
+register and flag effects and follows the parameter list.
 
-check_window(window → B, session: VID_SESSION → IX)
-    → (CF, A) clobbers(C, HL, F) {
+```text
+extern (CF, A) video_stack_safe(window → B, session: VID_SESSION → IX) clobbers(C, HL, F)
+
+(CF, A) check_window(window → B, session: VID_SESSION → IX) clobbers(C, HL, F) {
     (CF, A) = video_stack_safe(window, session)
     if (CF) return (CF, A)
     return (0, 1)
@@ -48,7 +53,7 @@ code stays in source order alongside the remaining instructions.
 
 ```text
 // Return the page number supplied by the caller.
-read_page(page → E) → A {
+A read_page(page → E) {
     /* The caller expects the result in A. */
     return page
 }
@@ -67,7 +72,7 @@ read_page:
 An arrow binds a parameter name to the register that holds it on entry. Here `page` already occupies E.
 
 ```text
-read_page(page → E) → A { return page }
+A read_page(page → E) { return page }
 ```
 
 ```asm
@@ -116,7 +121,7 @@ Return values in signature order. Here CF keeps its current value and A receives
 permutation that needs a temporary register requires explicit moves.
 
 ```text
-status(carry → CF) → (CF, A) { return (carry, 5) }
+(CF, A) status(carry → CF) { return (carry, 5) }
 ```
 
 ```asm
@@ -131,8 +136,8 @@ List all result locations in declaration order. A standalone call discards the r
 conditional meanings such as an error code in A when CF is set.
 
 ```text
-extern query() → (A, HL, DE)
-inspect() → HL clobbers(A, DE) {
+extern (A, HL, DE) query()
+HL inspect() clobbers(A, DE) {
     (A, HL, DE) = query()
     return HL
 }
@@ -150,8 +155,8 @@ Returning a call with a matching result ABI generates a jump. The destination mu
 in the active memory map.
 
 ```text
-extern read_byte() → A
-fetch() → A { return read_byte() }
+extern A read_byte()
+A fetch() { return read_byte() }
 ```
 
 ```asm
@@ -182,8 +187,8 @@ can fold a guarded tail call into a conditional jump. A nearby procedure
 in the same module can use `jr` under the usual branch selection rules.
 
 ```text
-extern read_byte() → A
-fetch(ready → Z) → A {
+extern A read_byte()
+A fetch(ready → Z) {
     if (ready) return read_byte()
     return 0
 }
@@ -203,7 +208,7 @@ register also appears in `clobbers`. F covers the six documented flags. AF, BC, 
 overlap their components.
 
 ```text
-extern probe() → (CF, A) clobbers(HL, F)
+extern (CF, A) probe() clobbers(HL, F)
 ```
 
 An `extern` declaration emits no instructions. Calling `probe` from a `z80asm` module adds `EXTERN probe` to its header.
@@ -215,7 +220,7 @@ caller must initialize D before returning DE.
 
 ```text
 extern work() clobbers(D)
-reset_high(word → DE) → DE {
+DE reset_high(word → DE) {
     work()
     D = 0
     return word
@@ -329,7 +334,7 @@ exx__example_1:
 returns 1 when Z is set. Execution continues after the body when Z is clear.
 
 ```text
-choose(flag → Z) → A {
+A choose(flag → Z) {
     if (flag) return 1
     return 2
 }
@@ -419,7 +424,7 @@ An exit restores the pairs in any `keep` blocks it leaves. EXX checks
 register availability and stack state at the destination.
 
 ```text
-fallback(ready → Z) → A {
+A fallback(ready → Z) {
     if (!ready) goto failed
     return 1
 failed:
@@ -461,7 +466,7 @@ An IX or IY pointer accepts a constant displacement from −128 to 127. The host
 resolves symbolic offsets.
 
 ```text
-previous(cursor → IX) → A { return cursor[-1] }
+A previous(cursor → IX) { return cursor[-1] }
 ```
 
 ```asm
@@ -477,7 +482,7 @@ register or alias. A byte load below uses `VID_CTX.config` for `asm` and `VID_CT
 `z80asm`. The caller supplies the actual address.
 
 ```text
-config(ctx: VID_CTX → IY) → A { return ctx->config }
+A config(ctx: VID_CTX → IY) { return ctx->config }
 ```
 
 ```asm
@@ -532,7 +537,7 @@ target emits `EXTERN` for referenced data.
 
 ```text
 extern data bs_storage_ops
-table_address() → HL { return &bs_storage_ops }
+HL table_address() { return &bs_storage_ops }
 ```
 
 ```asm
@@ -550,7 +555,7 @@ Use `name` for the stored value and `&name` for its address.
 
 ```text
 data cursor: u16 = 0x4000
-load_cursor() → HL { return cursor }
+HL load_cursor() { return cursor }
 ```
 
 ```asm
@@ -629,7 +634,7 @@ as the operand. The expression evaluates operands from left to right and
 checks that a nested assignment preserves any value or address still in use.
 
 ```text
-adjust(base → IY) → IY clobbers(DE, CF, HF, N) {
+IY adjust(base → IY) clobbers(DE, CF, HF, N) {
     base += (DE = BS_WORKSPACE_OFF + RST8_DATA_OFF)
     return base
 }
@@ -661,7 +666,7 @@ HL -= 1
 Copies between BC, DE and HL use two byte loads and preserve flags.
 
 ```text
-copy_pair(src → BC) → HL { return src }
+HL copy_pair(src → BC) { return src }
 ```
 
 ```asm
@@ -677,7 +682,7 @@ Subtracting BC, DE or HL from HL clears carry, then uses `sbc`.
 The sequence preserves A and sets the flags from the subtraction.
 
 ```text
-remaining(size → HL, skip → DE) → HL clobbers(F) {
+HL remaining(size → HL, skip → DE) clobbers(F) {
     size -= skip
     return size
 }
@@ -696,7 +701,7 @@ Combine a pair's two bytes with OR in an assignment to A. The condition
 uses the flags from that OR.
 
 ```text
-has_size(size → BC) → A clobbers(F) {
+A has_size(size → BC) clobbers(F) {
     if ((A = B | C)) return 1
     return 0
 }
@@ -1119,7 +1124,7 @@ block must honour it, preserve stack balance and pass control to the following E
 Declare external references used solely in raw assembly using the assembler’s directives.
 
 ```text
-invert(value → A) → A clobbers(HF, N) {
+A invert(value → A) clobbers(HF, N) {
     asm(value) → A clobbers(HF, N) {
         cpl
     }

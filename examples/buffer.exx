@@ -21,4 +21,4 @@ copy_prefix(src → DE, dst → HL, count → B) clobbers(A, F, DE, HL, B) {
 }
 
 // Return the byte immediately before the cursor.
-previous_byte(cursor → IX) → A { return cursor[-1] }
+A previous_byte(cursor → IX) { return cursor[-1] }

@@ -15,7 +15,7 @@ EXX требует Python 3.10 или новее и использует тол�
 передаются в A и B, результат возвращается в A, а сравнение меняет флаги в F.
 
 ```text
-minimum(value → A, limit → B) → A clobbers(F) {
+A minimum(value → A, limit → B) clobbers(F) {
     if (value < limit) return value
     return limit
 }
@@ -96,9 +96,9 @@ ASM должна соблюдать объявленный контракт.
 ./exx --target z80asm --abi video.abi caller.exx -o caller.asm
 ```
 
-Например, в `video.abi` объявлена процедура `extern read_page(page → E) → A`.
-Если в `video.exx` записать `read_page(page → E) → A { return page }`, а в `caller.exx` —
-`fetch_page(page → E) → A { return read_page(page) }`, оба модуля будут ссылаться на одно имя.
+Например, в `video.abi` объявлена процедура `extern A read_page(page → E)`.
+Если в `video.exx` записать `A read_page(page → E) { return page }`, а в `caller.exx` —
+`A fetch_page(page → E) { return read_page(page) }`, оба модуля будут ссылаться на одно имя.
 
 ```asm
 ; video.asm

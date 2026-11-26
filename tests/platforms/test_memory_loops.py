@@ -12,7 +12,7 @@ def instructions(source, **options):
 
 class MemoryTests(unittest.TestCase):
     def test_dereference_and_index_limits(self):
-        code = instructions("f(src → DE, dst → HL, idx → IX) → A clobbers(B) "
+        code = instructions("A f(src → DE, dst → HL, idx → IX) clobbers(B) "
                             "{A = *src; *dst = A; B = idx[-128]; idx[126 + 1] = B; return A}")
         self.assertEqual(code, [("ld", ("a", "(de)")), ("ld", ("(hl)", "a")),
                                 ("ld", ("b", "(ix - 128)")), ("ld", ("(ix + 127)", "b")), ("ret", ())])
@@ -21,11 +21,11 @@ class MemoryTests(unittest.TestCase):
             with self.subTest(statement=statement), self.assertRaises(ExxError):
                 instructions(f"f(src → DE, dst → HL, idx → IX) clobbers(A,B) {{ {statement} }}")
         with self.assertRaisesRegex(ExxError, "D, E unavailable"):
-            instructions("f() → A {return *DE}")
+            instructions("A f() {return *DE}")
 
     def test_indexed_bit_and_address_of(self):
         abi = [("defs.abi", "extern data table_base\nextern data unused\nfield CTX.ptr: u16")]
-        procs = compile_source("f(ctx: CTX → IY) → DE {ctx[-1]$2 = true; "
+        procs = compile_source("DE f(ctx: CTX → IY) {ctx[-1]$2 = true; "
                                "DE = &table_base; ctx->ptr = DE; return ctx->ptr}", interfaces=abi)
         self.assertEqual(procs[0].externals, {"table_base"})
         text = emit(procs, "z80asm")
@@ -47,7 +47,7 @@ class MemoryTests(unittest.TestCase):
 
     def test_nested_fields_use_the_leaf_type_and_sum_offsets(self):
         abi = [("layout.abi", "field ROOT.sub: NESTED\nfield NESTED.entry: ENTRY\nfield ENTRY.mode: u16")]
-        src = "f(ctx: ROOT → IX, word → HL) → HL {ctx->sub.entry.mode = word; return ctx->sub.entry.mode}"
+        src = "HL f(ctx: ROOT → IX, word → HL) {ctx->sub.entry.mode = word; return ctx->sub.entry.mode}"
         proc, = compile_source(src, interfaces=abi)
         for target, separator in (("asm", "."), ("z80asm", "_")):
             with self.subTest(target=target):
@@ -58,24 +58,24 @@ class MemoryTests(unittest.TestCase):
                 self.assertIn(f"    ld l, (ix + {offset})\n    ld h, (ix + {offset} + 1)\n", output)
 
     def test_nested_access_requires_an_embedded_layout(self):
-        source = "f(ctx: ROOT → IY) → A { return ctx->sub.entry }"
+        source = "A f(ctx: ROOT → IY) { return ctx->sub.entry }"
         for prefix in ("", "field ROOT.sub: u16\n"):
             with self.subTest(prefix=prefix), self.assertRaisesRegex(ExxError, "requires a nested layout"):
                 instructions(prefix + source)
         with self.assertRaisesRegex(ExxError, "select a member"):
-            instructions("field ROOT.sub: ENTRY\nf(ctx: ROOT → IY) → A { return ctx->sub }")
+            instructions("field ROOT.sub: ENTRY\nA f(ctx: ROOT → IY) { return ctx->sub }")
 
     def test_copy_subtract_and_test_register_pairs(self):
-        code = instructions("f(size → BC, skip → DE) → HL clobbers(A, F) {"
+        code = instructions("HL f(size → BC, skip → DE) clobbers(A, F) {"
                             "HL = size; HL -= skip; if (!(A = H | L)) return HL; return size }")
         self.assertEqual(code[:7], [
             ("ld", ("h", "b")), ("ld", ("l", "c")), ("or", ("a",)), ("sbc", ("hl", "de")),
             ("ld", ("a", "h")), ("or", ("l",)), ("ret", ("z",)),
         ])
         with self.assertRaisesRegex(ExxError, "undeclared clobber"):
-            instructions("f(size → HL, skip → DE) → HL { HL -= skip; return HL }")
+            instructions("HL f(size → HL, skip → DE) { HL -= skip; return HL }")
         with self.assertRaisesRegex(ExxError, "overwrites the right operand"):
-            instructions("f(left → B, right → A) → A clobbers(F) { A = left | right; return A }")
+            instructions("A f(left → B, right → A) clobbers(F) { A = left | right; return A }")
 
     def test_interface_conflicts(self):
         for decl in ("field CTX.ptr: u8", "field CTX.ptr: OTHER", "extern data handler",
@@ -86,7 +86,7 @@ class MemoryTests(unittest.TestCase):
 
 class RepeatTests(unittest.TestCase):
     def test_post_test_loop_preserves_flags(self):
-        code = instructions("f(c → CF) → CF clobbers(B) {B = 0; repeat (B) {}; return c}")
+        code = instructions("CF f(c → CF) clobbers(B) {B = 0; repeat (B) {}; return c}")
         self.assertEqual(code, [("ld", ("b", "0")), ("label", ("exx__f_1",)),
                                 ("djnz", ("exx__f_1",)), ("ret", ())])
         with self.assertRaisesRegex(ExxError, "B unavailable"):
@@ -97,13 +97,13 @@ class RepeatTests(unittest.TestCase):
             instructions("f(n → C) {repeat (n) {}}")
 
     def test_inner_break_and_dataflow(self):
-        code = instructions("f(n → B, ready → Z) → A clobbers(B) {"
+        code = instructions("A f(n → B, ready → Z) clobbers(B) {"
                             "repeat (n) { while (ready) { break }; A = 1; if (ready) break }; return A }")
         loop = next(args[0] for op, args in code if op == "djnz")
         self.assertIn(("label", (loop,)), code)
         self.assertIn(("jr", ("z", "exx__f_2")), code)
         with self.assertRaisesRegex(ExxError, "A unavailable"):
-            instructions("f(n → B, ready → Z) → A clobbers(B) {repeat (n) {if (ready) break; A = 1}; return A}")
+            instructions("A f(n → B, ready → Z) clobbers(B) {repeat (n) {if (ready) break; A = 1}; return A}")
         with self.assertRaisesRegex(ExxError, "enclosing loop"):
             instructions("f() {break}")
 

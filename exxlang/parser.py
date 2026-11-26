@@ -143,6 +143,13 @@ class _Parser:
 
     def _procedure(self, is_extern: bool, line: int) -> Proc:
         start = self.token.offset
+        outputs = ()
+        if self.token.value == "(":
+            outputs = self._names()
+            if len(outputs) < 2:
+                raise ExxError(line, "a result tuple requires at least two names")
+        elif self.token.kind == "name" and self.tokens[self.index + 1].kind == "name":
+            outputs = (self._advance().value,)
         name = self._expect_name().value
         self._expect("(")
         params = []
@@ -152,9 +159,6 @@ class _Parser:
                 if self._accept(")"):
                     break
                 self._expect(",")
-        outputs = ()
-        if self._accept_after_newlines("→", "->"):
-            outputs = self._names() if self.token.value == "(" else (self._expect_name().value,)
         clobbers = self._names() if self._accept_after_newlines("clobbers") else ()
         if is_extern:
             self._expect_statement_end()

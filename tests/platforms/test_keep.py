@@ -29,17 +29,17 @@ class KeepTests(unittest.TestCase):
                       [code[i:i + 2] for i in range(len(code))])
 
     def test_return_checks_only_live_parts(self):
-        assembly("f(x → B) → B { keep(BC) { C = 3; return x } }")
-        assembly("f() → A { A = 7; keep(AF) { keep(AF) { A = 3 }; return A } }")
-        assembly("f() → B { keep(AF) { A = 3; return A } }")
+        assembly("B f(x → B) { keep(BC) { C = 3; return x } }")
+        assembly("A f() { A = 7; keep(AF) { keep(AF) { A = 3 }; return A } }")
+        assembly("B f() { keep(AF) { A = 3; return A } }")
         for body in ("A = 3; return A", "if (flag) { A = 3 }; return A"):
             with self.subTest(body=body), self.assertRaisesRegex(ExxError, "keep.*live A"):
-                assembly("f(x → A, flag → CF) → A { keep(AF) { " + body + " } }")
+                assembly("A f(x → A, flag → CF) { keep(AF) { " + body + " } }")
         with self.assertRaisesRegex(ExxError, "keep.*live CF"):
-            assembly("f(x → A) → CF { keep(AF) { x += 1; return CF } }")
+            assembly("CF f(x → A) { keep(AF) { x += 1; return CF } }")
 
     def test_tail_call_restores_before_jump(self):
-        prefix = "extern next(x → A) → A\nf(x → A) → A { keep(AF) { "
+        prefix = "extern A next(x → A)\nA f(x → A) { keep(AF) { "
         code = assembly(prefix + "return next(x) } }")
         self.assertEqual(code, [("push", ("af",)), ("pop", ("af",)), ("jp", ("next",))])
         with self.assertRaisesRegex(ExxError, "keep.*live A"):

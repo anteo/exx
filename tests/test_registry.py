@@ -40,7 +40,7 @@ class RegistryTests(unittest.TestCase):
                 targets.register(Listing)
             source = Path(directory) / "main.exx"
             output = source.with_suffix(".asm")
-            source.write_text("pick(flag → CF) → A { if (flag) return 1; return 2 }")
+            source.write_text("A pick(flag → CF) { if (flag) return 1; return 2 }")
             args = ["--target", "listing", str(source), "-o", str(output)]
             self.assertEqual(main(args), 0)
             self.assertIn("; custom listing", output.read_text())
@@ -49,5 +49,5 @@ class RegistryTests(unittest.TestCase):
                 self.assertEqual(main([*args, "--platform", "z80"]), 1)
             self.assertIn("does not support", message.getvalue())
             with self.assertRaisesRegex(ExxError, "A unavailable"):
-                compile_source("pick(flag → CF) → A { if (flag) { A = 1 }; return A }",
+                compile_source("A pick(flag → CF) { if (flag) { A = 1 }; return A }",
                                platform="relative")

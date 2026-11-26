@@ -15,12 +15,17 @@
 
 ### Регистровый ABI
 
-```text
-extern video_stack_safe(window → B, session: VID_SESSION → IX)
-    → (CF, A) clobbers(C, HL, F)
+Результат указывается перед именем процедуры как в определении, так и в
+объявлении `extern`. Для одного результата пишите имя регистра или флага,
+например `A read_byte()`. Для нескольких используйте список в скобках,
+например `(CF, A) probe()`. Заголовок процедуры без результата начинается
+с имени, как в `reset()`. Стрелки привязывают параметры к регистрам, а
+`clobbers(...)` после списка параметров описывает изменения регистров и флагов.
 
-check_window(window → B, session: VID_SESSION → IX)
-    → (CF, A) clobbers(C, HL, F) {
+```text
+extern (CF, A) video_stack_safe(window → B, session: VID_SESSION → IX) clobbers(C, HL, F)
+
+(CF, A) check_window(window → B, session: VID_SESSION → IX) clobbers(C, HL, F) {
     (CF, A) = video_stack_safe(window, session)
     if (CF) return (CF, A)
     return (0, 1)
@@ -48,7 +53,7 @@ check_window:
 
 ```text
 // Вернуть номер страницы, переданный вызывающей стороной.
-read_page(page → E) → A {
+A read_page(page → E) {
     /* Вызывающая сторона ждёт результат в A. */
     return page
 }
@@ -67,7 +72,7 @@ read_page:
 Стрелка связывает имя параметра с физическим регистром. Здесь при входе `page` уже находится в E.
 
 ```text
-read_page(page → E) → A { return page }
+A read_page(page → E) { return page }
 ```
 
 ```asm
@@ -116,7 +121,7 @@ select_from_d:
 Если для перестановки значений нужен временный регистр, пересылки указываются явно.
 
 ```text
-status(carry → CF) → (CF, A) { return (carry, 5) }
+(CF, A) status(carry → CF) { return (carry, 5) }
 ```
 
 ```asm
@@ -132,8 +137,8 @@ status:
 в описании процедуры.
 
 ```text
-extern query() → (A, HL, DE)
-inspect() → HL clobbers(A, DE) {
+extern (A, HL, DE) query()
+HL inspect() clobbers(A, DE) {
     (A, HL, DE) = query()
     return HL
 }
@@ -151,8 +156,8 @@ inspect:
 должна быть доступна при текущем отображении памяти.
 
 ```text
-extern read_byte() → A
-fetch() → A { return read_byte() }
+extern A read_byte()
+A fetch() { return read_byte() }
 ```
 
 ```asm
@@ -183,8 +188,8 @@ EXX может свернуть хвостовой вызов в условны�
 в том же модуле возможен `jr` по обычным правилам выбора перехода.
 
 ```text
-extern read_byte() → A
-fetch(ready → Z) → A {
+extern A read_byte()
+A fetch(ready → Z) {
     if (ready) return read_byte()
     return 0
 }
@@ -204,7 +209,7 @@ fetch:
 AF, BC, DE и HL перекрываются со своими частями.
 
 ```text
-extern probe() → (CF, A) clobbers(HL, F)
+extern (CF, A) probe() clobbers(HL, F)
 ```
 
 Само объявление `extern` не порождает инструкций. При вызове `probe` из модуля для `z80asm` в его заголовке появится `EXTERN probe`.
@@ -217,7 +222,7 @@ DE.
 
 ```text
 extern work() clobbers(D)
-reset_high(word → DE) → DE {
+DE reset_high(word → DE) {
     work()
     D = 0
     return word
@@ -333,7 +338,7 @@ exx__example_1:
 при установленном Z. При сброшенном Z выполняется оператор после тела.
 
 ```text
-choose(flag → Z) → A {
+A choose(flag → Z) {
     if (flag) return 1
     return 2
 }
@@ -424,7 +429,7 @@ exx__example_2:
 он проверяет доступность регистров и состояние стека.
 
 ```text
-fallback(ready → Z) → A {
+A fallback(ready → Z) {
     if (!ready) goto failed
     return 1
 failed:
@@ -466,7 +471,7 @@ A = *src
 вычисляет основной ассемблер.
 
 ```text
-previous(cursor → IX) → A { return cursor[-1] }
+A previous(cursor → IX) { return cursor[-1] }
 ```
 
 ```asm
@@ -482,7 +487,7 @@ previous:
 `z80asm` — `VID_CTX_config`. За адрес отвечает вызывающая сторона.
 
 ```text
-config(ctx: VID_CTX → IY) → A { return ctx->config }
+A config(ctx: VID_CTX → IY) { return ctx->config }
 ```
 
 ```asm
@@ -538,7 +543,7 @@ set_mode:
 
 ```text
 extern data bs_storage_ops
-table_address() → HL { return &bs_storage_ops }
+HL table_address() { return &bs_storage_ops }
 ```
 
 ```asm
@@ -556,7 +561,7 @@ table_address:
 
 ```text
 data cursor: u16 = 0x4000
-load_cursor() → HL { return cursor }
+HL load_cursor() { return cursor }
 ```
 
 ```asm
@@ -635,7 +640,7 @@ A = B + C
 и проверяет, что вложенная запись сохраняет нужное значение или адрес.
 
 ```text
-adjust(base → IY) → IY clobbers(DE, CF, HF, N) {
+IY adjust(base → IY) clobbers(DE, CF, HF, N) {
     base += (DE = BS_WORKSPACE_OFF + RST8_DATA_OFF)
     return base
 }
@@ -668,7 +673,7 @@ HL -= 1
 Копирование между BC, DE и HL использует две байтовые загрузки и сохраняет флаги.
 
 ```text
-copy_pair(src → BC) → HL { return src }
+HL copy_pair(src → BC) { return src }
 ```
 
 ```asm
@@ -684,7 +689,7 @@ copy_pair:
 Последовательность сохраняет A и выставляет флаги по результату вычитания.
 
 ```text
-remaining(size → HL, skip → DE) → HL clobbers(F) {
+HL remaining(size → HL, skip → DE) clobbers(F) {
     size -= skip
     return size
 }
@@ -703,7 +708,7 @@ remaining:
 флаги этого OR.
 
 ```text
-has_size(size → BC) → A clobbers(F) {
+A has_size(size → BC) clobbers(F) {
     if ((A = B | C)) return 1
     return 0
 }
@@ -1129,7 +1134,7 @@ hex_digits:
 которые используются только внутри вставки, объявляются директивами ассемблера.
 
 ```text
-invert(value → A) → A clobbers(HF, N) {
+A invert(value → A) clobbers(HF, N) {
     asm(value) → A clobbers(HF, N) {
         cpl
     }

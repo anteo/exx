@@ -127,9 +127,9 @@ def assemble_field_address(directory: Path, sjasmplus: str, z80asm: str) -> None
 
 def assemble_shared_abi(directory: Path, sjasmplus: str, z80asm: str) -> None:
     directory.mkdir()
-    (directory / "shared.abi").write_text("extern fetch(arg → B) → A\n")
-    (directory / "provider.exx").write_text("fetch(value → B) → A { return value }\n")
-    (directory / "caller.exx").write_text("forward(value → B) → A { return fetch(value) }\n")
+    (directory / "shared.abi").write_text("extern A fetch(arg → B)\n")
+    (directory / "provider.exx").write_text("A fetch(value → B) { return value }\n")
+    (directory / "caller.exx").write_text("A forward(value → B) { return fetch(value) }\n")
     for target in ("asm", "z80asm"):
         for module in ("caller", "provider"):
             run([sys.executable, str(ROOT / "exx"), "--platform", "z80", "--target", target,

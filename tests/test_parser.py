@@ -7,12 +7,25 @@ from exxlang.syntax import Param
 
 class ParserTests(unittest.TestCase):
     def test_extern_and_definition_have_distinct_bodies(self):
-        extern, proc = parse("extern f(x: T → IX) → (CF, A) clobbers(HL)\ng() {}").procs
+        extern, proc, void = parse("extern (CF, A) f(x: T → IX) clobbers(HL)\nA g() {}\nh() {}").procs
         self.assertEqual(extern.params, (Param("x", "IX", "T", 1),))
         self.assertEqual(extern.outputs, ("CF", "A"))
         self.assertEqual(extern.clobbers, ("HL",))
         self.assertIsNone(extern.body)
         self.assertEqual(proc.body, ())
+        self.assertEqual(proc.outputs, ("A",))
+        self.assertEqual(void.outputs, ())
+
+    def test_legacy_result_suffix_is_rejected(self):
+        for arrow in ("→", "->"):
+            for source in (f"f() {arrow} A {{ return 0 }}", f"extern f() {arrow} (CF, A)"):
+                with self.subTest(source=source), self.assertRaises(ExxError):
+                    parse(source)
+
+    def test_result_tuple_requires_multiple_locations(self):
+        for source in ("() f() {}", "extern (A) f()"):
+            with self.subTest(source=source), self.assertRaisesRegex(ExxError, "at least two"):
+                parse(source)
 
     def test_call_capture_and_field_access(self):
         proc, = parse("f(p: T → IX) { (CF, A) = read(p); return p->value }").procs

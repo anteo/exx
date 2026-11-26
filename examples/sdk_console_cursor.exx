@@ -1,23 +1,23 @@
-// From zxevo-sdk lib/common/src/console/z80/zx__console_newline.asm
-// and zx__console_advance.asm. The row and column counts are nonzero.
-
-zx__console_newline(cursor → BC, rows → D) → (BC) clobbers(A, F) {
+// Move to the first column of the next row, staying at the bottom row.
+// Rows must be nonzero. Carry is set when the next row fits.
+(CF, BC) zx__console_newline(cursor → BC, rows → D) clobbers(A, F) {
     (column, row) → (C, B)
     column = 0
+    row += 1
     A = row
-    A += 1
-    if (A >= rows) {
-        A = rows
-        A -= 1
-    }
-    row = A
-    return cursor
+    if (A < rows) return (CF, cursor)
+
+    row = rows
+    row -= 1
+    return (CF, cursor)
 }
 
-zx__console_advance(cursor → BC, geometry → DE) → (BC) clobbers(A, F) {
+// Advance one cell and wrap at the right edge.
+// Both dimensions must be nonzero. Carry is set when no scroll is needed.
+(CF, BC) zx__console_advance(cursor → BC, geometry → DE) clobbers(A, F) {
     (column, columns, rows) → (C, E, D)
     column += 1
     A = column
-    if (A < columns) return cursor
+    if (A < columns) return (CF, cursor)
     return zx__console_newline(cursor, rows)
 }

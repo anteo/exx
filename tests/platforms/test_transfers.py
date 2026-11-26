@@ -7,7 +7,7 @@ from exxlang.diagnostics import ExxError
 class TransferTests(unittest.TestCase):
     def test_partial_register_and_flags_survive_save_and_call(self):
         src = ("extern run() clobbers(AF, BC)\n"
-               "f(c → CF, b → B) → (CF, B) { push(AF); push(BC); run(); "
+               "(CF, B) f(c → CF, b → B) { push(AF); push(BC); run(); "
                "pop(BC); pop(AF); return (c, b) }")
         proc, = compile_source(src)
         self.assertEqual([ins.mnemonic for ins in proc.instructions],
@@ -16,10 +16,10 @@ class TransferTests(unittest.TestCase):
             compile_source(src.replace("→ (CF, B)", "→ (CF, C)").replace("return (c, b)", "return (c, C)"))
 
     def test_reinterpreting_a_stack_word(self):
-        compile_source("f(x → IX) → HL { push(x); pop(HL); return HL }")
-        compile_source("f(c → C) → CF clobbers(AF) { push(BC); pop(AF); return CF }")
+        compile_source("HL f(x → IX) { push(x); pop(HL); return HL }")
+        compile_source("CF f(c → C) clobbers(AF) { push(BC); pop(AF); return CF }")
         with self.assertRaisesRegex(ExxError, "A unavailable"):
-            compile_source("f(c → C) → A clobbers(AF) { push(BC); pop(AF); return A }")
+            compile_source("A f(c → C) clobbers(AF) { push(BC); pop(AF); return A }")
 
     def test_preservation_checks_original_contents(self):
         with self.assertRaisesRegex(ExxError, "undeclared clobber"):
@@ -38,27 +38,27 @@ class TransferTests(unittest.TestCase):
         compile_source("f(flag → Z) { while (flag) {push(BC); pop(BC)} }")
 
     def test_branch_merge_retains_only_common_saved_values(self):
-        compile_source("f(flag → Z, a → BC, b → DE) → HL { if (flag) {push(a)} else {push(b)}; pop(HL); return HL }")
+        compile_source("HL f(flag → Z, a → BC, b → DE) { if (flag) {push(a)} else {push(b)}; pop(HL); return HL }")
         with self.assertRaisesRegex(ExxError, "H, L unavailable"):
-            compile_source("f(flag → Z, a → BC) → HL { if (flag) {push(a)} else {push(DE)}; pop(HL); return HL }")
+            compile_source("HL f(flag → Z, a → BC) { if (flag) {push(a)} else {push(DE)}; pop(HL); return HL }")
 
     def test_shadow_bank_reads_and_external_clobbers(self):
-        compile_source("f(saved → HL_ALT) → HL clobbers(HL_ALT, BC, BC_ALT, DE, DE_ALT) "
+        compile_source("HL f(saved → HL_ALT) clobbers(HL_ALT, BC, BC_ALT, DE, DE_ALT) "
                        "{ exx(); return HL }")
         with self.assertRaisesRegex(ExxError, "A unavailable"):
-            compile_source("f() → A clobbers(AF, AF_ALT) { ex(AF); return A }")
+            compile_source("A f() clobbers(AF, AF_ALT) { ex(AF); return A }")
         with self.assertRaisesRegex(ExxError, "undeclared clobber"):
             compile_source("extern work() clobbers(AF_ALT)\nf() clobbers(AF_ALT) "
                            "{ex(AF); work(); ex(AF)}")
 
     def test_io_checks_full_port_address_and_flags(self):
         with self.assertRaisesRegex(ExxError, "B unavailable"):
-            compile_source("f(c → C) → A clobbers(F) {A = in(BC); return A}")
+            compile_source("A f(c → C) clobbers(F) {A = in(BC); return A}")
         with self.assertRaisesRegex(ExxError, "A unavailable"):
-            compile_source("f() → A {A = in(0xFE); return A}")
-        compile_source("f(high → A, c → CF) → (A, CF) {A = in(0xfe); return (A, c)}")
+            compile_source("A f() {A = in(0xFE); return A}")
+        compile_source("(A, CF) f(high → A, c → CF) {A = in(0xfe); return (A, c)}")
         with self.assertRaisesRegex(ExxError, "CF unavailable"):
-            compile_source("f(p → HL, port → BC) → CF clobbers(F, HL, B) "
+            compile_source("CF f(p → HL, port → BC) clobbers(F, HL, B) "
                            "{inir(p, C, B); return CF}")
 
     def test_block_families(self):
