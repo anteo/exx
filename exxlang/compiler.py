@@ -352,10 +352,16 @@ class Lowering:
             right = self.operand(rhs.args[1], 0 if rhs.value in ("<<", ">>") else dst.width)
             if left.kind == right.kind == "imm":
                 code = self.cpu.move(dst, self.operand(rhs, dst.width))
-            elif left == dst:
-                code = self.cpu.binary(dst, rhs.value, right)
             else:
-                raise ExxError(stmt.line, f"assign the left operand to {dst.text} explicitly first")
+                prefix = ()
+                if left != dst:
+                    if dst.kind != "reg":
+                        raise ExxError(stmt.line, "an expression needs an explicit destination register")
+                    prefix = self.cpu.move(dst, left)
+                    right_reads = self.cpu.operand_reads(right)
+                    if any(right_reads & (ins.writes | ins.invalidates) for ins in prefix):
+                        raise ExxError(stmt.line, f"loading {dst.text} overwrites the right operand")
+                code = prefix + self.cpu.binary(dst, rhs.value, right)
         else:
             code = self.cpu.move(dst, self.operand(rhs))
         self.target_code(code, stmt.line)

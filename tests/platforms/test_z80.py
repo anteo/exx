@@ -24,7 +24,7 @@ class Z80Tests(unittest.TestCase):
 
     def test_rejects_invalid_loads_before_assembly(self):
         for destination, source in (
-            (z80.register("HL"), z80.register("DE")),
+            (z80.register("HL"), z80.register("IX")),
             (z80.register("F"), z80.register("A")),
             (z80.register("E"), z80.Operand("mem", "BC", 8)),
             (z80.register("A"), z80.Operand("mem", "IX + 128", 8)),

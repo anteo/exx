@@ -19,7 +19,8 @@ WORD_PARTS = {
     "IY": frozenset(("IY",)),
     "SP": frozenset(("SP",)),
 }
-LOAD_WORDS = frozenset(("BC", "DE", "HL", "IX", "IY", "SP"))
+DATA_PAIRS = frozenset(("BC", "DE", "HL"))
+LOAD_WORDS = DATA_PAIRS | {"IX", "IY", "SP"}
 INDEX_REGISTERS = frozenset(("IX", "IY"))
 SHADOW_PAIRS = ("AF", "BC", "DE", "HL")
 for _pair in SHADOW_PAIRS:
@@ -224,7 +225,7 @@ def _field_word_move(dst, src):
     memory, value = (dst, src) if store else (src, dst)
     low = Operand("mem", memory.text, 8)
     high = Operand("mem", memory.text + " + 1", 8)
-    if value.kind == "reg" and value.text in ("BC", "DE", "HL"):
+    if value.kind == "reg" and value.text in DATA_PAIRS:
         lo, hi = register(value.text[1]), register(value.text[0])
     elif store and value.kind == "imm":
         _validate_immediate(value, 16)
@@ -255,6 +256,8 @@ def move(dst: Operand, src: Operand) -> tuple[Instruction, ...]:
     elif src.kind != "flag" and (src.kind == "imm" or dst.width == src.width):
         if dst.width == 8 and _byte_load(dst, src):
             return _ld(dst, src)
+        if dst.kind == src.kind == "reg" and dst.text in DATA_PAIRS and src.text in DATA_PAIRS:
+            return _ld(register(dst.text[0]), register(src.text[0])) + _ld(register(dst.text[1]), register(src.text[1]))
         if dst.width == 16 and _word_load(dst, src):
             return _ld(dst, src)
     raise TargetError(f"cannot assign {src.text} to {dst.text} on Z80")
@@ -320,6 +323,12 @@ def binary(dst: Operand, op: str, src: Operand) -> tuple[Instruction, ...]:
             writes = resources(dst.text) | {"CF", "HF", "N"}
             return (Instruction("add", (_text(dst), _text(src)), reads, writes,
                                 encoded_size=1 + _index_prefix(dst.text)),)
+    if op == "-" and dst == register("HL") and src.kind == "reg" and src.text in DATA_PAIRS | {"SP"}:
+        # OR A leaves A intact and clears carry for any incoming A.
+        # The following SBC replaces all flags, so only carry is live here.
+        clear_carry = Instruction("or", ("a",), writes=frozenset(("CF", "HF", "N")),
+                                  invalidates=frozenset(("Z", "S", "PV")), encoded_size=1)
+        return (clear_carry,) + update_intrinsic("sbc", (dst, src))
     raise TargetError(f"cannot generate {dst.text} {op}= {src.text} on Z80 without a temporary")
 
 
@@ -526,6 +535,13 @@ def compact(code: list[Instruction]) -> tuple[Instruction, ...]:
     index = 0
     while index < len(code):
         instruction = code[index]
+        # A truth test immediately after an OR in the same expression
+        # can use the flags that already describe its accumulator result.
+        if (instruction.mnemonic == "or" and instruction.operands == ("a",) and index > 0
+                and code[index - 1].mnemonic == "or"
+                and code[index - 1].source_offset == instruction.source_offset):
+            index += 1
+            continue
         index += 1
         if instruction.mnemonic != "jp":
             compacted.append(instruction)

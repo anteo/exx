@@ -65,6 +65,18 @@ class MemoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ExxError, "select a member"):
             instructions("field ROOT.sub: ENTRY\nf(ctx: ROOT → IY) → A { return ctx->sub }")
 
+    def test_copy_subtract_and_test_register_pairs(self):
+        code = instructions("f(size → BC, skip → DE) → HL clobbers(A, F) {"
+                            "HL = size; HL -= skip; if (!(A = H | L)) return HL; return size }")
+        self.assertEqual(code[:7], [
+            ("ld", ("h", "b")), ("ld", ("l", "c")), ("or", ("a",)), ("sbc", ("hl", "de")),
+            ("ld", ("a", "h")), ("or", ("l",)), ("ret", ("z",)),
+        ])
+        with self.assertRaisesRegex(ExxError, "undeclared clobber"):
+            instructions("f(size → HL, skip → DE) → HL { HL -= skip; return HL }")
+        with self.assertRaisesRegex(ExxError, "overwrites the right operand"):
+            instructions("f(left → B, right → A) → A clobbers(F) { A = left | right; return A }")
+
     def test_interface_conflicts(self):
         for decl in ("field CTX.ptr: u8", "field CTX.ptr: OTHER", "extern data handler",
                      "extern data ix", "extern data exx__reserved"):

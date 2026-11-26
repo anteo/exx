@@ -660,12 +660,11 @@ B = 0b10000000
 
 ### Accumulator arithmetic
 
-Choose the destination explicitly. To add B and C, copy B into A and add C. Separate statements
-with newlines or semicolons. Unsupported forms produce a diagnostic on the source line.
+Choose the destination explicitly. EXX loads the left operand into A before
+adding C. The load must preserve the right operand.
 
 ```text
-A = B
-A += C
+A = B + C
 ```
 
 ```asm
@@ -685,6 +684,64 @@ HL -= 1
 ```asm
     add hl, de
     dec hl
+```
+
+### Register-pair copies
+
+Copies between BC, DE and HL use two byte loads and preserve flags.
+
+```text
+copy_pair(src → BC) → HL { return src }
+```
+
+```asm
+copy_pair:
+    ld h, b
+    ld l, c
+    ret
+```
+
+### Register-pair subtraction
+
+Subtracting BC, DE or HL from HL clears carry, then uses `sbc`.
+The sequence preserves A and sets the flags from the subtraction.
+
+```text
+remaining(size → HL, skip → DE) → HL clobbers(F) {
+    size -= skip
+    return size
+}
+```
+
+```asm
+remaining:
+    or a
+    sbc hl, de
+    ret
+```
+
+### Register-pair zero tests
+
+Combine a pair's two bytes with OR in an assignment to A. The condition
+uses the flags from that OR.
+
+```text
+has_size(size → BC) → A clobbers(F) {
+    if ((A = B | C)) return 1
+    return 0
+}
+```
+
+```asm
+has_size:
+    ld a, b
+    or c
+    jr z, exx__has_size_1
+    ld a, 1
+    ret
+exx__has_size_1:
+    ld a, 0
+    ret
 ```
 
 ### Bit tests
