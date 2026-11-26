@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.1
+
+### Features
+
+- (syntax) **Breaking.** put procedure results before names
+- (syntax) add register increment and decrement operators
+
+### Fixes
+
+- (highlight) style flags like registers
+- (release) publish GitHub releases with changelog notes
+
+### Tests
+
+- (abi) use result prefixes in interface fixtures
+
 ## v0.2.0
 
 ### Documentation
