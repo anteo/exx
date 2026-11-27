@@ -105,6 +105,12 @@ class DataSymbol:
 
 
 @dataclass(frozen=True)
+class AbiUse:
+    path: str
+    line: int
+
+
+@dataclass(frozen=True)
 class Program:
     procs: tuple[Proc, ...]
     data: tuple[DataSymbol, ...] = ()
@@ -114,3 +120,4 @@ class Program:
     structs: tuple[Struct, ...] = ()
     constants: tuple[Constant, ...] = ()
     origins: tuple[Origin, ...] = ()
+    uses: tuple[AbiUse, ...] = ()

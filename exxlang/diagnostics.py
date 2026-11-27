@@ -9,3 +9,8 @@ class ExxError(Exception):
         self.line = line
         self.message = message
         self.source = None
+
+
+def declaration_conflict(line, message, previous_line, previous_source):
+    location = f"{previous_source}:{previous_line}" if previous_source is not None else f"line {previous_line}"
+    return ExxError(line, f"{message} (previous declaration at {location})")

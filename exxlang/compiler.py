@@ -4,7 +4,8 @@ from collections import deque
 from dataclasses import dataclass, field, replace
 import operator
 
-from .diagnostics import ExxError
+from .abi import AbiImports
+from .diagnostics import ExxError, declaration_conflict
 from .flow import Flow
 from .parser import parse
 from .ir import Directive, Instruction, Operand, StaticData, TargetError
@@ -30,13 +31,14 @@ class Procedure:
 class CompiledModule(list[Procedure]):
     """Lowered procedures and other module items in source order."""
 
-    def __init__(self, procedures, comments, assembly, data, structs, directives):
+    def __init__(self, procedures, comments, assembly, data, structs, directives, abi_dependencies):
         super().__init__(procedures)
         self.comments = comments
         self.assembly = assembly
         self.data = data
         self.structs = structs
         self.directives = directives
+        self.abi_dependencies = abi_dependencies
 
 
 @dataclass
@@ -129,6 +131,7 @@ class Declarations:
     layouts: LayoutTable = field(default_factory=LayoutTable)
     constants: dict = field(default_factory=dict)
     constant_values: dict = field(default_factory=dict)
+    signature_sources: dict = field(default_factory=dict)
 
     def data_address(self, symbol, externals):
         if symbol.kind != "name" or symbol.value not in self.data:
@@ -149,12 +152,28 @@ class Declarations:
     def collect_constants(self, cpu, program, source):
         for constant in program.constants:
             name = constant.name
-            if (name in self.constants or name in self.layouts.definitions or cpu.register(name.upper())
-                    or name.upper() in cpu.unsupported_registers or name.lower().startswith("exx__")):
-                error = ExxError(constant.line, f"invalid or conflicting constant {name}")
+            message = f"invalid or conflicting constant {name}"
+            try:
+                previous = self.constants.get(name) or self.layouts.structs.get(name)
+                if previous is not None:
+                    declaration, path = previous
+                    raise declaration_conflict(constant.line, message, declaration.line, path)
+                if (cpu.register(name.upper()) or name.upper() in cpu.unsupported_registers
+                        or name.lower().startswith("exx__")):
+                    raise ExxError(constant.line, message)
+            except ExxError as error:
                 error.source = source
                 raise error
             self.constants[name] = (constant, source)
+
+    def declaration_site(self, name):
+        signature = self.data.get(name) or self.procedures.get(name)
+        if signature is not None:
+            return signature.line, self.signature_sources[name]
+        declaration = self.constants.get(name) or self.layouts.structs.get(name)
+        if declaration is not None:
+            symbol, source = declaration
+            return symbol.line, source
 
     def evaluate_constant(self, name, cpu, parents=()):
         if name not in self.constant_values:
@@ -258,7 +277,7 @@ def resolve_stack_arguments(cpu, proc, declarations):
     return replace(proc, params=tuple(params))
 
 
-def collect_signatures(cpu, program, declarations, *, interface=False):
+def collect_signatures(cpu, program, declarations, source, *, interface=False):
     if interface and program.assembly:
         raise ExxError(program.assembly[0].line, "an ABI file may only contain declarations")
     if interface and program.origins:
@@ -266,26 +285,32 @@ def collect_signatures(cpu, program, declarations, *, interface=False):
     found = declarations.procedures
     for symbol in program.data:
         name = symbol.name
-        if (name in found or name in declarations.constants or name in declarations.layouts.definitions
-                or name.lower().startswith("exx__") or cpu.register(name.upper())
-                or name.upper() in cpu.unsupported_registers):
+        if name in found or name in declarations.constants or name in declarations.layouts.definitions:
+            raise declaration_conflict(symbol.line, f"invalid or conflicting data symbol {name}",
+                                       *declarations.declaration_site(name))
+        if name.lower().startswith("exx__") or cpu.register(name.upper()) or name.upper() in cpu.unsupported_registers:
             raise ExxError(symbol.line, f"invalid or conflicting data symbol {name}")
         if interface and symbol.initializer is not None:
             raise ExxError(symbol.line, "a shared ABI file may only declare external data")
         previous = declarations.data.get(name)
         if previous is not None:
             if previous.type_name and symbol.type_name and previous.type_name != symbol.type_name:
-                raise ExxError(symbol.line, f"conflicting data type for {name}")
+                raise declaration_conflict(symbol.line, f"conflicting data type for {name}",
+                                           *declarations.declaration_site(name))
             if previous.initializer is not None and symbol.initializer is not None:
-                raise ExxError(symbol.line, f"duplicate definition of data {name}")
+                raise declaration_conflict(symbol.line, f"duplicate definition of data {name}",
+                                           *declarations.declaration_site(name))
             if previous.initializer is not None or (previous.type_name and symbol.initializer is None):
                 continue
         declarations.data[name] = symbol
+        declarations.signature_sources[name] = source
     for proc in program.procs:
         if proc.name in declarations.data:
-            raise ExxError(proc.line, f"{proc.name} is declared as data")
+            raise declaration_conflict(proc.line, f"{proc.name} is declared as data",
+                                       *declarations.declaration_site(proc.name))
         if proc.name in declarations.constants or proc.name in declarations.layouts.definitions:
-            raise ExxError(proc.line, f"{proc.name} is declared as a constant or struct")
+            raise declaration_conflict(proc.line, f"{proc.name} is declared as a constant or struct",
+                                       *declarations.declaration_site(proc.name))
         if interface and proc.body is not None:
             raise ExxError(proc.line, "a shared ABI file may only contain extern, struct, layout, field and const declarations")
         if proc.name.lower().startswith("exx__"):
@@ -304,11 +329,14 @@ def collect_signatures(cpu, program, declarations, *, interface=False):
         previous = found.get(proc.name)
         if previous is not None:
             if abi_key(cpu, previous) != abi_key(cpu, proc):
-                raise ExxError(proc.line, f"incompatible ABI for {proc.name}")
+                raise declaration_conflict(proc.line, f"incompatible ABI for {proc.name}",
+                                           *declarations.declaration_site(proc.name))
             if previous.body is not None and proc.body is not None:
-                raise ExxError(proc.line, f"duplicate definition of {proc.name}")
+                raise declaration_conflict(proc.line, f"duplicate definition of {proc.name}",
+                                           *declarations.declaration_site(proc.name))
         if previous is None or proc.body is not None:
             found[proc.name] = proc
+            declarations.signature_sources[proc.name] = source
 
 
 class Lowering:
@@ -806,41 +834,41 @@ class Lowering:
                          self.proc.start, self.proc.end)
 
 
-def compile_source(source: str, *, platform=None, interfaces=()) -> CompiledModule:
+def compile_source(source: str, *, platform=None, interfaces=(), source_path=None, abi_paths=()) -> CompiledModule:
     cpu = platforms.create(platform)
     declared = Declarations()
-    parsed_interfaces = []
-    for path, declarations in interfaces:
-        try:
-            parsed_interfaces.append((path, parse(declarations)))
-        except ExxError as error:
-            error.source = path
-            raise
     comments = []
     program = parse(source, comments=comments)
+    imported = AbiImports(source_path)
+    for path, declarations in interfaces:
+        imported.load(path, declarations)
+    for path in abi_paths:
+        imported.load(path)
+    imported.load_uses(program, source_path)
+    parsed_interfaces = imported.units.values()
     for path, unit in parsed_interfaces:
         declared.layouts.collect(unit, path)
-    declared.layouts.collect(program, None)
+    declared.layouts.collect(program, source_path)
     declared.layouts.resolve()
     for path, unit in parsed_interfaces:
         declared.collect_constants(cpu, unit, path)
-    declared.collect_constants(cpu, program, None)
+    declared.collect_constants(cpu, program, source_path)
     for name in declared.constants:
         declared.evaluate_constant(name, cpu)
     for path, unit in parsed_interfaces:
         try:
-            collect_signatures(cpu, unit, declared, interface=True)
+            collect_signatures(cpu, unit, declared, path, interface=True)
         except ExxError as error:
             error.source = path
             raise
-    collect_signatures(cpu, program, declared)
+    collect_signatures(cpu, program, declared, source_path)
     data = tuple(lower_data(symbol, declared, cpu) for symbol in program.data if symbol.initializer is not None)
     directives = [Directive(c.name, declared.constant_values[c.name].text, c.start) for c in program.constants]
     directives.extend(Directive(None, declared.require_constant(origin.value, cpu).text, origin.start)
                       for origin in program.origins)
     module = CompiledModule((Lowering(declared.procedures[proc.name], declared, cpu).finish() for proc in program.procs
                              if proc.body is not None), comments, program.assembly, data,
-                            tuple(declared.layouts.definitions.values()), tuple(directives))
+                            tuple(declared.layouts.definitions.values()), tuple(directives), tuple(imported.units))
     layout = getattr(cpu, "layout_module", None)
     if layout is not None:
         layout(module)

@@ -1,9 +1,10 @@
 """Parse the EXX token stream into a syntax tree."""
 
 from dataclasses import replace
+import re
 
 from .diagnostics import ExxError
-from .syntax import AsmBlock, Constant, DataSymbol, Expr, Field, Layout, Origin, Param, Proc, Program, Stmt, Struct
+from .syntax import AbiUse, AsmBlock, Constant, DataSymbol, Expr, Field, Layout, Origin, Param, Proc, Program, Stmt, Struct
 from .tokenizer import Token, tokenize
 
 
@@ -98,6 +99,7 @@ class _Parser:
         structs = []
         constants = []
         origins = []
+        uses = []
         self._skip_separators()
         while self.token.kind != "eof":
             line = self.token.line
@@ -124,13 +126,26 @@ class _Parser:
                 start = self._advance()
                 origins.append(Origin(self._expression(), start.line, start.offset))
                 self._expect_statement_end()
+            elif not is_extern and self.token.value == "use" and following.value != "(":
+                self._advance()
+                self._declaration_group(lambda: uses.append(self._abi_use()))
             elif not is_extern and self.token.value == "asm":
                 assembly.append(self._assembly(file_scope=True))
             else:
                 procs.append(self._procedure(is_extern, line))
             self._skip_separators()
         return Program(tuple(procs), tuple(data), tuple(fields), tuple(assembly), tuple(layouts), tuple(structs),
-                       tuple(constants), tuple(origins))
+                       tuple(constants), tuple(origins), tuple(uses))
+
+    def _abi_use(self) -> AbiUse:
+        token = self.token
+        if token.kind != "string":
+            raise ExxError(token.line, f"expected a quoted ABI path, found {self._found()}")
+        self._advance()
+        path = re.sub(r'\\(["\\])', r'\1', token.value[1:-1])
+        if not path or "\0" in path:
+            raise ExxError(token.line, "invalid ABI path")
+        return AbiUse(path, token.line)
 
     def _declaration_group(self, entry):
         if self._accept("{"):

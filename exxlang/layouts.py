@@ -1,6 +1,6 @@
 """Sizes, field types, and offsets for EXX and assembler-owned layouts."""
 
-from .diagnostics import ExxError
+from .diagnostics import ExxError, declaration_conflict
 from .ir import StructDefinition, StructMember
 
 
@@ -14,38 +14,48 @@ class LayoutTable:
         self.structs = {}
         self.offsets = {}
         self.definitions = {}
-        self._external_layouts = set()
+        self._external_layouts = {}
+        self._layout_sites = {}
+        self._field_sites = {}
 
     def collect(self, program, source):
         try:
             for layout in program.layouts:
                 if layout.name in SCALAR_WIDTHS or layout.size == 0:
                     raise ExxError(layout.line, "a layout requires a non-scalar name and a positive byte size")
-                self._declare_external(layout.name, layout.line)
+                self._declare_external(layout.name, layout.line, source)
                 previous = self.sizes.setdefault(layout.name, layout.size)
                 if previous != layout.size:
-                    raise ExxError(layout.line, f"conflicting layout size for {layout.name}")
+                    raise declaration_conflict(layout.line, f"conflicting layout size for {layout.name}",
+                                               *self._layout_sites[layout.name])
+                self._layout_sites.setdefault(layout.name, (layout.line, source))
             for member in program.fields:
-                self._declare_external(member.name.rpartition(".")[0], member.line)
+                self._declare_external(member.name.rpartition(".")[0], member.line, source)
                 previous = self.field_types.setdefault(member.name, member.type_name)
                 if previous != member.type_name:
-                    raise ExxError(member.line, f"conflicting field type for {member.name}")
+                    raise declaration_conflict(member.line, f"conflicting field type for {member.name}",
+                                               *self._field_sites[member.name])
+                self._field_sites.setdefault(member.name, (member.line, source))
             for struct in program.structs:
                 if struct.name in SCALAR_WIDTHS or not struct.members:
                     raise ExxError(struct.line, "a struct requires a non-scalar name and at least one field")
                 if struct.name in self._external_layouts:
-                    raise ExxError(struct.line, f"{struct.name} already has layout or field declarations")
+                    raise declaration_conflict(struct.line, f"{struct.name} already has layout or field declarations",
+                                               *self._external_layouts[struct.name])
                 if struct.name in self.structs:
-                    raise ExxError(struct.line, f"duplicate definition of struct {struct.name}")
+                    previous, path = self.structs[struct.name]
+                    raise declaration_conflict(struct.line, f"duplicate definition of struct {struct.name}",
+                                               previous.line, path)
                 self.structs[struct.name] = (struct, source)
         except ExxError as error:
             error.source = source
             raise
 
-    def _declare_external(self, name, line):
+    def _declare_external(self, name, line, source):
         if name in self.structs:
-            raise ExxError(line, f"{name} is already defined as a struct")
-        self._external_layouts.add(name)
+            previous, path = self.structs[name]
+            raise declaration_conflict(line, f"{name} is already defined as a struct", previous.line, path)
+        self._external_layouts.setdefault(name, (line, source))
 
     def size(self, name):
         width = SCALAR_WIDTHS.get(name)

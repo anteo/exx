@@ -1,12 +1,12 @@
 [ (line_comment) (block_comment) (assembly_comment) ] @comment
-(assembly_string) @string
+[ (abi_path) (assembly_string) ] @string
 [ (number) (assembly_number) ] @number
 (boolean) @boolean
 (builtin_type) @type.builtin
 (type_name) @type
 
 [ "if" "else" "do" "while" "repeat" "break" "goto" "return" "keep"
-  "extern" "data" "field" "layout" "struct" "const" "origin" "frame" "stack" "clobbers" "asm" ] @keyword
+  "extern" "data" "field" "layout" "struct" "const" "origin" "use" "frame" "stack" "clobbers" "asm" ] @keyword
 
 [ (arrow) (assignment_operator) (postfix_operator) "→" "->" "=" "++" "--" "+" "-" "*" "!" "~" "$"
   "&" "|" "^" "&&" "||" "<<" ">>" "==" "!=" "<" "<=" ">" ">=" ] @operator

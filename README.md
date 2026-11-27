@@ -113,9 +113,11 @@ the size `CELL`, which can be used to reserve storage with `defs CELL`.
 
 ### Shared interfaces
 
-Pass the same declarations to the caller and the implementation. EXX checks input registers and
-layouts, result order and clobbers. Repeat `--abi` to load several interfaces. External ASM
-implementations must honour their declarations.
+Load the same declarations in the caller and the implementation. EXX checks input registers,
+layouts, result order and clobbers. Put `use "video.abi"` in both source files to resolve
+the path relative to each file, or pass `--abi` from the build. External ASM implementations
+must honour their declarations. The [syntax manual](MANUAL.md#importing-abi-declarations)
+shows how to import several files or share dependencies between ABI files.
 
 ```sh
 ./exx --target z80asm --abi video.abi video.exx -o video.asm
@@ -149,7 +151,8 @@ fetch_page:
 ### Make integration
 
 Include `exx.mk` to rebuild the assembly when the source, compiler or a shared file listed in
-`EXX_ABI` changes.
+`EXX_ABI` changes. List ABI files referenced through `use` as Make prerequisites, including
+any files imported by those ABI files.
 
 ```make
 include path/to/exx/exx.mk

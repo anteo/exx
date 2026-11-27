@@ -51,8 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         platform = args.platform or target.platforms[0]
         if platform not in target.platforms:
             raise ValueError(f"{target.name} does not support platform {platform}")
-        interfaces = [(path, path.read_text(encoding="utf-8")) for path in args.abi]
-        procedures = compile_source(source, platform=platform, interfaces=interfaces)
+        procedures = compile_source(source, platform=platform, source_path=args.source, abi_paths=args.abi)
         assembly = target.emit(procedures, args.section, args.include,
                                layouts_only=args.layouts_only, indent=args.indent)
         if args.output is None:
@@ -60,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             output = args.output.resolve()
             if any(output == path.resolve() or (output.exists() and output.samefile(path))
-                   for path in [args.source, *args.abi]):
+                   for path in (args.source, *procedures.abi_dependencies)):
                 raise ValueError("output must be a different file from the source and ABI files")
             _write_output(output, assembly)
     except ExxError as error:

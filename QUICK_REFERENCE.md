@@ -80,6 +80,8 @@ supports it. Check the listing when opcode choice, flags, size or timing matter.
 Use the assembler target already selected by the project. `asm` emits a
 generic assembly fragment. For a shared ABI, keep procedure declarations and
 struct definitions in the same `.abi` sources used by every EXX caller.
+Import them with `use "abi/video.abi"` or `use { "abi/video.abi", "abi/os.abi" }`.
+Paths are relative to the file containing `use`, including inside ABI files.
 The `--layouts-only` output lets ordinary ASM include those structures.
 
 When porting an existing routine, compare the generated instructions with the

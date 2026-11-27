@@ -15,7 +15,7 @@ module.exports = grammar({
   rules: {
     source_file: $ => repeat(choice($.procedure, $.external_procedure,
       $.data_declaration, $.field_declaration, $.layout_declaration, $.struct_declaration,
-      $.constant_declaration, $.origin_declaration, $.assembly, ';')),
+      $.constant_declaration, $.origin_declaration, $.abi_use, $.assembly, ';')),
 
     procedure: $ => seq($._signature, optional($.frame), optional($.clobbers), $.block),
     external_procedure: $ => seq('extern', $._signature, optional($.clobbers)),
@@ -54,6 +54,8 @@ module.exports = grammar({
       seq('{', repeat(choice($.constant_entry, ',', ';')), '}'))),
     constant_entry: $ => seq(field('name', $.identifier), '=', $._expression),
     origin_declaration: $ => seq('origin', $._expression),
+    abi_use: $ => seq('use', choice($.abi_path, seq('{', repeat(choice($.abi_path, ',', ';')), '}'))),
+    abi_path: _ => /"([^"\\\r\n]|\\["\\])*"/,
     qualified_name: $ => seq($.identifier, repeat1(seq('.', $.identifier))),
 
     block: $ => seq('{', repeat(choice($._statement, ';')), '}'),

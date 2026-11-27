@@ -9,6 +9,8 @@
     "exx": {
       "patterns": [
         { "include": "#comments" },
+        { "name": "string.quoted.double.exx", "match": "\"(?:[^\"\\\\\\r\\n]|\\\\[\"\\\\])*\"" },
+        { "name": "keyword.other.exx", "match": "\\buse(?=[ \\t]*(?:\"|\\{))" },
         { "include": "#procedure-results" },
         {
           "match": "\\b(goto)[ \\t]+([a-zA-Z_]\\w*)",

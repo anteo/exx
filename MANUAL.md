@@ -449,6 +449,43 @@ extern (CF, A) probe() clobbers(HL, F)
 
 An `extern` declaration emits no instructions. Calling `probe` from a `z80asm` module adds `EXTERN probe` to its header.
 
+### Importing ABI declarations
+
+Use `use "path.abi"` at file scope in an EXX source or ABI file. A relative
+path starts at the directory of the file containing the `use`. The same ABI
+file is loaded once even if it is reached through several imports or also
+passed with `--abi`. Cycles and conflicting declarations are errors.
+
+```text
+// abi/video.abi
+extern A read_page(page → E)
+```
+
+```text
+// caller.exx
+use "abi/video.abi"
+A fetch_page(page → E) { return read_page(page) }
+```
+
+```asm
+fetch_page:
+    jp read_page
+```
+
+To import several files together, separate the paths with newlines, commas,
+or semicolons.
+
+```text
+use {
+    "abi/video.abi"
+    "abi/console.abi"
+}
+```
+
+An ABI file can contain `extern` procedure and data declarations, `struct`,
+`layout`, `field`, `const`, and `use`. Assemble or link the implementation
+separately. The `use` directive itself emits no assembler `INCLUDE`.
+
 ### Definite assignment
 
 A read requires a value on every incoming path, including loop back edges. After `work()` the
