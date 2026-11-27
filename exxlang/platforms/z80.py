@@ -81,6 +81,12 @@ def register(name: str) -> Operand | None:
     return None
 
 
+def register_half(name: str, member: str) -> Operand | None:
+    if name in DATA_PAIRS and member in ("hi", "lo"):
+        return register(name[0 if member == "hi" else 1])
+    return None
+
+
 def resources(name: str) -> frozenset[str]:
     if name == "F":
         return FLAGS
@@ -655,6 +661,7 @@ class Z80:
     setup_frame = staticmethod(setup_frame)
     storage_layout = STORAGE
     register = staticmethod(register)
+    register_half = staticmethod(register_half)
     resources = staticmethod(resources)
     field_operand = staticmethod(field_operand)
     indirect_operand = staticmethod(indirect_operand)

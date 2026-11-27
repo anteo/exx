@@ -434,13 +434,28 @@ class Lowering:
             operand = replace(address, width=width)
         return replace(operand, read_only=True)
 
+    def alias_operand(self, name, line):
+        alias, _, member = name.partition(".")
+        if alias not in self.aliases:
+            return None
+        register, _ = self.aliases[alias]
+        if not member:
+            return self.cpu.register(register)
+        if member not in ("lo", "hi"):
+            raise ExxError(line, f"unknown register alias member {name}")
+        byte = self.cpu.register_half(register, member)
+        if byte is None:
+            raise ExxError(line, f"{name}: {register} has no addressable .lo or .hi register")
+        return byte
+
     def operand(self, expr, width=0):
         if expr.kind == "name":
             name, *path = expr.value.split(".")
             if name in self.stack_args:
                 return self.stack_operand(self.stack_args[name], path, expr.line)
-            if expr.value in self.aliases:
-                return self.cpu.register(self.aliases[expr.value][0])
+            alias = self.alias_operand(expr.value, expr.line)
+            if alias is not None:
+                return alias
             reg = self.cpu.register(expr.value)
             if reg:
                 return reg
@@ -710,7 +725,10 @@ class Lowering:
 
     def assembly(self, block):
         def locations(names, *, allow_group=False):
-            registers = [self.aliases[name][0] if name in self.aliases else name for name in names]
+            registers = []
+            for name in names:
+                alias = self.alias_operand(name, block.line)
+                registers.append(alias.text if alias is not None else name)
             validate_group(self.cpu, registers, block.line, allow_group)
             return parts(self.cpu, registers)
 

@@ -14,6 +14,36 @@ def instructions(procedure):
 
 
 class CompilerTests(unittest.TestCase):
+    def test_pair_alias_bytes_are_physical_register_operands(self):
+        for pair, high, low in (("BC", "b", "c"), ("DE", "d", "e"), ("HL", "h", "l")):
+            with self.subTest(pair=pair):
+                proc, = compile_text(f"""
+                    (A, {pair}) copy_high(value → {pair}) {{
+                        addr → {pair}
+                        A = value.hi
+                        addr.lo = A
+                    }}
+                """)
+                self.assertEqual(instructions(proc), [
+                    ("ld", ("a", high)), ("ld", (low, "a")), ("ret", ()),
+                ])
+
+    def test_pairs_without_byte_registers_reject_half_access(self):
+        for register in ("A", "AF", "IX", "IY"):
+            with self.subTest(register=register), self.assertRaisesRegex(ExxError, "has no addressable"):
+                compile_text(f"A read(addr → {register}) {{ return addr.lo }}")
+
+    def test_lo_and_hi_can_still_be_structure_fields(self):
+        stack, pointer, offset = compile_text("""
+            struct BYTES { lo: u8; hi: u8 }
+            A read_stack(value: BYTES) frame(IY) { return value.lo }
+            A read_pointer(value: BYTES → IX) { return value->hi }
+            A read_offset() { return BYTES.hi }
+        """)
+        self.assertIn(("ld", ("a", "(iy + 4)")), instructions(stack))
+        self.assertIn(("ld", ("a", "(ix + 1)")), instructions(pointer))
+        self.assertIn(("ld", ("a", "1")), instructions(offset))
+
     def test_do_while_branches_directly_on_flags_from_the_body(self):
         proc, = compile_text("""
             extern data __console_x: u8

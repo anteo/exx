@@ -6,6 +6,14 @@ from exxlang.emit import emit
 
 
 class InlineAssemblyTests(unittest.TestCase):
+    def test_contract_resolves_alias_halves_and_checks_overlap(self):
+        source = "BC f(word → BC) { asm(word.hi) → word.lo { ld c,b } }"
+        proc, = compile_source(source)
+        block = proc.instructions[0]
+        self.assertEqual((block.reads, block.writes), ({"B"}, {"C"}))
+        with self.assertRaisesRegex(ExxError, "overlapping"):
+            compile_source("f(word → BC) { asm(word, word.lo) { nop } }")
+
     def test_file_blocks_keep_their_order_and_native_syntax(self):
         native = '\tdefb "}","{",\'}\' ; unmatched }\n\t; // /* #ifdef\n\tMAC {arg}\n'
         source = ("asm {\n    IFDEF DEBUG\n" + native + "    ENDIF\n}\n"

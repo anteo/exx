@@ -22,6 +22,8 @@ extern (CF, A) probe(window → B, context: CTX → IX) clobbers(HL, F)
 - `name → REG` binds a register. A local binding can bind several at once,
   as in `(column, row) → (C, B)`. Use `CF` for carry and `C` for the register.
   The modeled flags are `CF`, `Z`, `S`, `PV`, `HF` and `N`.
+- For an alias of BC, DE or HL, `.lo` and `.hi` name writable byte registers.
+  After `addr → HL`, `addr.lo = A` emits `ld l,a`.
 - Inputs and results of calls must already occupy their declared locations.
   EXX checks calls and clobbers. Move operands explicitly when needed.
 - Use `return` or the closing brace when all declared results are defined.

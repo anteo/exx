@@ -298,6 +298,29 @@ cursor += 1
     inc hl
 ```
 
+### Register-pair bytes
+
+An alias for BC, DE or HL exposes its low byte as `.lo` and its high byte as
+`.hi`. These operands read and write the underlying byte registers. The same
+notation works for register parameters and in an inline `asm` contract.
+
+```text
+(A, HL) copy_high(addr → HL) {
+    A = addr.hi
+    addr.lo = A
+}
+```
+
+```asm
+copy_high:
+    ld a, h
+    ld l, a
+    ret
+```
+
+A stack structure can still contain fields named `lo` or `hi`. For example,
+`surface.lo` reads the field when `surface` is passed by value on the stack.
+
 ### Checked calls
 
 EXX checks the number and location of arguments. This caller explicitly moves D into the

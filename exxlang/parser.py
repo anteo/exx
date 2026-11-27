@@ -226,11 +226,11 @@ class _Parser:
         if file_scope and self.token.value != "{":
             raise ExxError(start.line, "a file-scope asm block takes no register contract")
         if self.token.value == "(":
-            inputs = self._names()
+            inputs = self._names(qualified=True)
         if self._accept_after_newlines("→", "->"):
-            outputs = self._names() if self.token.value == "(" else (self._expect_name().value,)
+            outputs = self._names(qualified=True) if self.token.value == "(" else (self._qualified_name(),)
         if self._accept_after_newlines("clobbers"):
-            clobbers = self._names()
+            clobbers = self._names(qualified=True)
         self._skip_newlines()
         self._expect("{")
         body = self._advance()
@@ -296,12 +296,12 @@ class _Parser:
             parts.append(self._expect_name().value)
         return ".".join(parts)
 
-    def _names(self) -> tuple[str, ...]:
+    def _names(self, *, qualified=False) -> tuple[str, ...]:
         self._expect("(")
         names = []
         if not self._accept(")"):
             while True:
-                names.append(self._expect_name().value)
+                names.append(self._qualified_name() if qualified else self._expect_name().value)
                 if self._accept(")"):
                     break
                 self._expect(",")
