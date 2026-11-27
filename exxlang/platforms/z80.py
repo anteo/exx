@@ -455,6 +455,31 @@ def update_intrinsic(name, operands):
 
 _TRANSFER_NAMES = {"push", "pop", "ex", "exx", "ex_sp"}
 _STACK_PAIRS = {"AF", "BC", "DE", "HL", "IX", "IY"}
+_STACK_BYTE_PAIRS = {pair[0]: pair for pair in _STACK_PAIRS - INDEX_REGISTERS}
+
+
+def stack_byte_pair(low, high):
+    pair = high.text + low.text
+    return register(pair) if pair in DATA_PAIRS else None
+
+
+def adjust_call_stack(delta):
+    # The outgoing area is private to one call. Its lifetime excludes any keep saves.
+    return (Instruction("inc" if delta > 0 else "dec", ("sp",), encoded_size=1),) * abs(delta)
+
+
+def push_call_argument(operand):
+    name = operand.text
+    if operand.width == 8:
+        pair = _STACK_BYTE_PAIRS.get(name)
+        if pair is None:
+            raise TargetError(f"an unpaired stack byte needs A, B, D or H (got {name})")
+        # Discard the low byte. Only the high byte is an input to the call.
+        return (Instruction("push", (pair.lower(),), resources(name), encoded_size=1),
+                *adjust_call_stack(1))
+    if name in _STACK_PAIRS - {"AF"}:
+        return (Instruction("push", (name.lower(),), resources(name), encoded_size=1 + _index_prefix(name)),)
+    raise TargetError(f"a stack word needs BC, DE, HL, IX or IY (got {name})")
 
 
 def _transfer(name, operands):
@@ -657,6 +682,10 @@ class Z80:
     frame_flags = WORD_ADD_FLAGS
     frame_status_register = "AF"
     stack_return_size = STACK_WORD_SIZE
+    max_stack_call_size = 0x10000 - 2 * STACK_WORD_SIZE
+    stack_byte_pair = staticmethod(stack_byte_pair)
+    adjust_call_stack = staticmethod(adjust_call_stack)
+    push_call_argument = staticmethod(push_call_argument)
     frame_displacement = staticmethod(frame_displacement)
     setup_frame = staticmethod(setup_frame)
     storage_layout = STORAGE

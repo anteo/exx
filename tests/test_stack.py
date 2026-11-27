@@ -77,8 +77,92 @@ class StackArgumentTests(unittest.TestCase):
             ("extern g() clobbers(IX)\nf(x: u8) frame(IX) { g() }", "cannot modify active frame register IX"),
             ("extern g(frame_pointer → IX)\nf(x: u8) frame(IX) { return g(IX) }",
              "restoration would overwrite live IX"),
-            ("extern g(x: u8)\nf() { g(1) }", "require an asm block"),
+            ("extern g(x: u8)\nf() { g(1) }", "stack argument needs an explicit 8-bit register"),
             ("CF f(x: u8) frame(IX) clobbers(HF, N) {}", "CF unavailable"),
+        ):
+            with self.subTest(source=source), self.assertRaisesRegex(ExxError, diagnostic):
+                compile_source(source)
+
+
+class StackCallTests(unittest.TestCase):
+    def test_word_byte_and_explicit_register_input(self):
+        assembly = emit(compile_source("""
+            extern (CF, A) probe(word: u16, tag: u8, page → D) clobbers(HF, N)
+            (CF, A) relay(word → HL, tag → B, page → E) clobbers(D, HF, N) {
+                return probe(word, tag, (D = page))
+            }
+        """), "asm")
+        self.assertIn("push bc\n    inc sp\n    push hl\n    ld d, e\n    call probe\n"
+                      "    inc sp\n    inc sp\n    inc sp\n    ret", assembly)
+
+    def test_stack_call_restores_keep_after_cleaning_arguments(self):
+        assembly = emit(compile_source("""
+            extern (CF, A) probe(value: u8) clobbers(B, HF, N)
+            (CF, A) relay(value → A) clobbers(HF, N) {
+                keep(BC) { return probe(value) }
+            }
+        """), "asm")
+        self.assertIn("push bc\n    push af\n    inc sp\n    call probe\n    inc sp\n    pop bc\n    ret", assembly)
+
+    def test_logical_arguments_can_share_a_push_across_structure_boundary(self):
+        assembly = emit(compile_source("""
+            struct SURFACE { mode: u8, page0: u8, page1: u8 }
+            extern data draw
+            extern put(surface: SURFACE, x: u8, y: u8, character: u8)
+            paint(x → B, page1 → C, character → D, y → E) clobbers(HL) {
+                head → HL
+                head = *(&draw)
+                put(SURFACE {
+                    page1: page1
+                    mode: head.lo
+                    page0: head.hi
+                }, x, y, character)
+            }
+        """), "asm")
+        self.assertIn("ld hl, (draw)\n    push de\n    push bc\n    push hl\n    call put\n"
+                      + "    inc sp\n" * 6 + "    ret", assembly)
+
+    def test_explicit_loads_are_evaluated_in_stack_order(self):
+        assembly = emit(compile_source("""
+            struct HEADER { mode: u8, pair: PAIR }
+            struct PAIR { lo: u8, hi: u8 }
+            extern sink(header: HEADER, character: u8)
+            send(character → A) clobbers(A, HL) {
+                sink(HEADER {
+                    pair: PAIR { lo: (L = 1), hi: (H = 2) }
+                    mode: (A = 3)
+                }, character)
+            }
+        """), "asm")
+        self.assertIn("push af\n    inc sp\n    ld h, 2\n    ld l, 1\n    push hl\n"
+                      "    ld a, 3\n    push af\n    inc sp\n    call sink", assembly)
+
+    def test_pushes_old_byte_before_its_register_is_reused(self):
+        assembly = emit(compile_source("""
+            extern sink(left: u8, right: u8)
+            send() clobbers(A) { sink((A = 1), (A = 2)) }
+        """), "asm")
+        self.assertIn("ld a, 2\n    push af\n    inc sp\n    ld a, 1\n    push af\n    inc sp\n    call sink", assembly)
+
+    def test_explicit_slots_reserve_padding_by_offset(self):
+        assembly = emit(compile_source("""
+            extern pack(tag: u8 → stack[5], value: u16 → stack[2])
+            send(tag → H, value → IX) { pack(tag, value) }
+        """), "asm")
+        self.assertIn("push hl\n    inc sp\n    dec sp\n    push ix\n    call pack\n"
+                      + "    inc sp\n" * 4 + "    ret", assembly)
+
+    def test_stack_call_diagnostics(self):
+        for source, diagnostic in (
+            ("extern g(x: u8)\nf(low → L) { g(low) }", "unpaired stack byte needs A, B, D or H"),
+            ("extern g(x: u16)\nf(byte → B) { g(byte) }", "explicit 16-bit register"),
+            ("extern g(x: u8)\nf() { g(A) }", "A unavailable"),
+            ("extern g(x: u8, other → A)\nf(other → A) clobbers(A) { g((A = 1), other) }",
+             "argument preparation overwrites a register argument: A"),
+            ("struct ITEM { ch: u8 }\nextern g(x: ITEM)\nf() { g(ITEM {}) }", "missing field ITEM.ch"),
+            ("struct ITEM { ch: u8 }\nextern g(x: ITEM)\nf() { g(ITEM { color: A }) }", "unknown field ITEM.color"),
+            ("struct ITEM { ch: u8 }\nextern g(x: ITEM)\nf() { g(ITEM { ch: A, ch: A }) }", "duplicate field ITEM.ch"),
+            ("layout ITEM: 1\nextern g(x: ITEM)\nf() { g(ITEM { ch: A }) }", "needs a native struct"),
         ):
             with self.subTest(source=source), self.assertRaisesRegex(ExxError, diagnostic):
                 compile_source(source)

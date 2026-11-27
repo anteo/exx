@@ -462,7 +462,7 @@ class _Parser:
         if token.kind == "name":
             name = self._qualified_name()
             if self._accept("("):
-                return Expr("call", name, self._list_tail(), token.line)
+                return Expr("call", name, self._list_tail(self._call_argument), token.line)
             value = Expr("name", name, (), token.line)
             if self._accept("->"):
                 while True:
@@ -473,10 +473,30 @@ class _Parser:
             return value
         raise ExxError(token.line, f"expected an expression, found {self._found()}")
 
-    def _list_tail(self) -> tuple[Expr, ...]:
+    def _call_argument(self) -> Expr:
+        start = self.index
+        token = self.token
+        if token.kind == "name":
+            name = self._qualified_name()
+            if self._accept("{"):
+                members = []
+
+                def member():
+                    field = self._expect_name()
+                    self._expect(":")
+                    self._skip_newlines()
+                    members.append(Expr("member", field.value, (self._call_argument(),), field.line))
+
+                self._declaration_entries(member)
+                return Expr("struct", name, tuple(members), token.line)
+            self.index = start
+        return self._expression()
+
+    def _list_tail(self, item=None) -> tuple[Expr, ...]:
+        item = item or self._expression
         items = []
         while not self._accept(")"):
-            items.append(self._expression())
+            items.append(item())
             if self._accept(")"):
                 break
             self._expect(",")

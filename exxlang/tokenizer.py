@@ -25,6 +25,7 @@ _TOKEN = re.compile(
 )
 _KEYWORDS = frozenset({"asm", "extern", "clobbers", "if", "else", "do", "while", "repeat", "break", "goto", "origin",
                        "return", "true", "false"})
+_CLOSING = {"}": "{", ")": "(", "]": "["}
 
 # Braces inside assembler strings and comments are data. The apostrophe
 # in the Z80 register AF' is part of the register name.
@@ -50,7 +51,7 @@ def tokenize(source: str, *, comments: list[Token] | None = None) -> list[Token]
     source = source.replace("\r\n", "\n").replace("\r", "\n")
     tokens = []
     line = 1
-    parentheses = 0
+    groups = []
     offset = 0
     asm_header = False
     while offset < len(source):
@@ -65,7 +66,7 @@ def tokenize(source: str, *, comments: list[Token] | None = None) -> list[Token]
         if kind in {"comment", "newline"}:
             if kind == "comment" and comments is not None:
                 comments.append(Token(kind, value, line, match.start()))
-            if "\n" in value and parentheses == 0:
+            if "\n" in value and (not groups or groups[-1] == "{"):
                 tokens.append(Token("newline", "\n", line))
             line += value.count("\n")
         elif asm_header and value == "{":
@@ -78,10 +79,10 @@ def tokenize(source: str, *, comments: list[Token] | None = None) -> list[Token]
             offset = end + 1
             asm_header = False
         elif kind != "space":
-            if value in ("(", "["):
-                parentheses += 1
-            elif value in (")", "]") and parentheses > 0:
-                parentheses -= 1
+            if value in ("(", "[", "{"):
+                groups.append(value)
+            elif groups and _CLOSING.get(value) == groups[-1]:
+                groups.pop()
             if kind == "name" and value in _KEYWORDS:
                 kind = "keyword"
                 if value == "asm":

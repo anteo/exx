@@ -24,11 +24,12 @@ extern (CF, A) probe(window → B, context: CTX → IX) clobbers(HL, F)
   The modeled flags are `CF`, `Z`, `S`, `PV`, `HF` and `N`.
 - For an alias of BC, DE or HL, `.lo` and `.hi` name writable byte registers.
   After `addr → HL`, `addr.lo = A` emits `ld l,a`.
-- Inputs and results of calls must already occupy their declared locations.
-  EXX checks calls and clobbers. Move operands explicitly when needed.
+- EXX checks call locations and clobbers. Prepare inputs explicitly, either
+  before the call or with `(register = expression)` in the argument list.
 - Use `return` or the closing brace when all declared results are defined.
   `return value` and `return (flag, value)` prepare results.
-  `return callee(args)` emits a tail jump and requires matching results.
+  `return callee(args)` requires matching results. Register-only calls can
+  jump directly. Stack calls use `call`, clean up and return.
 - `clobbers(F)` covers all flags. Include every caller-visible change,
   including changes caused by a comparison or a helper. For a call that
   clobbers a live register, preserve it with `keep` or reload it.
@@ -59,6 +60,14 @@ supports it. Check the listing when opcode choice, flags, size or timing matter.
   for an explicit byte offset from entry SP. `frame(IX)` or `frame(IY)` is
   required to read incoming arguments. The caller removes them. A stack
   structure uses dot access, as in `surface.page0`.
+- For `extern send(tag: u8, size: u16)`, call `send((A = tag), HL)`.
+  Stack arguments are evaluated from highest to lowest offset. Put lone
+  bytes in A, B, D or H. Adjacent low/high bytes already in BC, DE or HL
+  share a `push`. EXX cleans up the arguments and preserves call results.
+- For a stack parameter of native `struct` type, pass `CELL { ch: A, attr: H }`.
+  Name all fields, using the same notation for a nested structure. To load
+  two adjacent bytes explicitly, assign `head = *(&symbol)` to a word
+  register alias and use `head.lo` and `head.hi` as the field values.
 - `struct CELL { ch: u8, attr: u8 }` defines a packed layout owned by EXX.
   Native structs can contain other sized layouts. For a layout supplied by
   ASM, use `layout CELL: 2` and `field CELL.ch: u8`, or a grouped declaration

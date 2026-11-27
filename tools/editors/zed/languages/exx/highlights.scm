@@ -18,6 +18,7 @@
 (call function: (_) @function)
 (parameter name: (identifier) @variable.parameter)
 (member_declaration name: (identifier) @property)
+(field_argument name: (identifier) @property)
 (constant_entry name: (identifier) @constant)
 (access member: (identifier) @property)
 (label name: (identifier) @label)

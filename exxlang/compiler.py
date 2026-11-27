@@ -488,7 +488,10 @@ class Lowering:
             base, offset = (self.operand(x) for x in expr.args)
             return self.cpu.indirect_operand(base, offset)
         if expr.kind == "unary" and expr.value == "*":
-            return self.cpu.indirect_operand(self.operand(expr.args[0]))
+            address = self.operand(expr.args[0])
+            if address.kind == "imm":
+                return self.cpu.absolute_operand(address, width or 8)
+            return self.cpu.indirect_operand(address)
         value = constant_operand(expr, width, self.operand)
         if value is not None:
             return value
@@ -556,6 +559,81 @@ class Lowering:
             self.target_code(self.cpu.branch(left, expr.value if comparison else None, right,
                                         label, truth, new_label=self.label), expr.line)
 
+    def stack_fragments(self, arg, type_name, offset):
+        if type_name in _SCALAR_WIDTHS:
+            if arg.kind == "struct":
+                raise ExxError(arg.line, f"expected a scalar {type_name} stack argument")
+            yield offset, _SCALAR_WIDTHS[type_name] // 8, arg
+            return
+        struct = self.declarations.layouts.definitions.get(type_name)
+        if struct is None:
+            raise ExxError(arg.line, f"a by-value stack argument needs a native struct definition for {type_name}")
+        if arg.kind != "struct" or arg.value != type_name:
+            raise ExxError(arg.line, f"expected a {type_name} {{ ... }} stack argument")
+        names = {member.name for member in struct.members}
+        fields = {}
+        for field in arg.args:
+            if field.value not in names:
+                raise ExxError(field.line, f"unknown field {type_name}.{field.value}")
+            if field.value in fields:
+                raise ExxError(field.line, f"duplicate field {type_name}.{field.value}")
+            fields[field.value] = field.args[0]
+        for member in struct.members:
+            if member.name not in fields:
+                raise ExxError(arg.line, f"missing field {type_name}.{member.name}")
+            yield from self.stack_fragments(fields[member.name], member.type_name, offset + member.offset)
+
+    def argument_value(self, arg, protected, width=0):
+        start = len(self.steps)
+        value = self.value_operand(arg, width)
+        changed = frozenset().union(*(step.kills | step.instruction.writes | step.instruction.invalidates
+                                     for step in self.steps[start:]))
+        if changed & protected:
+            registers = ", ".join(sorted(changed & protected))
+            raise ExxError(arg.line, f"argument preparation overwrites a register argument: {registers}")
+        return value, changed
+
+    def prepare_stack_call(self, fragments, protected, line):
+        cursor = max(offset + size for offset, size, _ in fragments)
+        count = cursor - self.cpu.stack_return_size
+        if count > self.cpu.max_stack_call_size:
+            raise ExxError(line, "outgoing stack arguments exceed the addressable stack size")
+        pending = None
+        for offset, size, arg in sorted(fragments, key=lambda fragment: fragment[0], reverse=True):
+            gap = cursor - offset - size
+            if pending is not None and (gap or size != 1):
+                high, high_line = pending
+                self.target_code(self.cpu.push_call_argument(high), high_line)
+                pending = None
+            self.target_code(self.cpu.adjust_call_stack(-gap), arg.line)
+            cursor = offset
+
+            start = len(self.steps)
+            value, changed = self.argument_value(arg, protected, size * 8)
+            if value.kind != "reg" or value.width != size * 8:
+                raise ExxError(arg.line, f"stack argument needs an explicit {size * 8}-bit register")
+            if pending is not None:
+                high, high_line = pending
+                pair = self.cpu.stack_byte_pair(value, high)
+                if pair is not None and not (self.cpu.resources(high.text) & changed):
+                    self.target_code(self.cpu.push_call_argument(pair), arg.line)
+                    pending = None
+                    continue
+                # Spill the higher byte before evaluating a lower byte that may overwrite it.
+                preparation = self.steps[start:]
+                del self.steps[start:]
+                self.target_code(self.cpu.push_call_argument(high), high_line)
+                self.steps.extend(preparation)
+            if size == 1:
+                pending = (value, arg.line)
+            else:
+                self.target_code(self.cpu.push_call_argument(value), arg.line)
+        if pending is not None:
+            high, high_line = pending
+            self.target_code(self.cpu.push_call_argument(high), high_line)
+        self.target_code(self.cpu.adjust_call_stack(self.cpu.stack_return_size - cursor), line)
+        return count
+
     def call(self, expr, targets=None, tail=False):
         callee = self.symbols.get(expr.value)
         if callee is None and expr.value in self.cpu.load_names:
@@ -573,17 +651,26 @@ class Lowering:
             return
         if callee is None:
             raise ExxError(expr.line, f"undeclared procedure {expr.value}")
-        if any(p.register is None for p in callee.params):
-            raise ExxError(expr.line, f"EXX calls to {callee.name} with stack parameters require an asm block")
         if len(expr.args) != len(callee.params):
             raise ExxError(expr.line, f"{callee.name} expects {len(callee.params)} arguments")
+        register_args = []
+        stack_fragments = []
         for arg, param in zip(expr.args, callee.params):
-            loc = self.operand(arg)
+            if param.register is None:
+                stack_fragments.extend(self.stack_fragments(arg, param.type_name, param.stack_offset))
+            else:
+                register_args.append((arg, param))
+        ready = parts(self.cpu, (param.register for arg, param in register_args
+                                if arg.kind not in ("assign", "prefix_update")))
+        cleanup = self.prepare_stack_call(stack_fragments, ready, expr.line) if stack_fragments else 0
+        for arg, param in register_args:
+            loc, _ = self.argument_value(arg, ready)
             if loc != self.cpu.register(param.register):
                 raise ExxError(arg.line, f"{callee.name}: {param.name} expects {param.register}, got {loc.text}")
             if param.type_name and self.layouts.get(loc.text) != param.type_name:
                 layout = self.layouts.get(loc.text, "untyped register")
                 raise ExxError(arg.line, f"{param.name} requires layout {param.type_name}, got {layout}")
+            ready |= self.cpu.resources(param.register)
         if targets is not None:
             actual = tuple(self.operand(t) for t in targets)
             if actual != tuple(self.cpu.register(o) for o in callee.outputs):
@@ -592,11 +679,15 @@ class Lowering:
             raise ExxError(expr.line, f"tail call to {callee.name} has incompatible results")
         if callee.body is None:
             self.externals.add(callee.name)
-        reads = parts(self.cpu, (p.register for p in callee.params))
-        if tail:
-            self.restore_kept(0, expr.line, reads)
-        self.emit(self.cpu.call(callee.name, reads, parts(self.cpu, callee.outputs), tail),
+        jump = tail and not cleanup
+        if jump:
+            self.restore_kept(0, expr.line, ready)
+        self.emit(self.cpu.call(callee.name, ready, parts(self.cpu, callee.outputs), jump),
                   expr.line, parts(self.cpu, callee.clobbers))
+        if cleanup:
+            self.target_code(self.cpu.adjust_call_stack(cleanup), expr.line)
+            if tail:
+                self.returns(Stmt("return", expr.line))
 
     def assign(self, stmt):
         rhs = stmt.value
@@ -642,7 +733,7 @@ class Lowering:
                         raise ExxError(stmt.line, f"loading {dst.text} overwrites the right operand")
                 code = prefix + self.cpu.binary(dst, rhs.value, right)
         else:
-            code = self.cpu.move(dst, self.value_operand(rhs, preserve=address_reads))
+            code = self.cpu.move(dst, self.value_operand(rhs, dst.width, preserve=address_reads))
         self.target_code(code, stmt.line)
 
     def returns(self, stmt):

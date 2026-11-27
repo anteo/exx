@@ -165,8 +165,81 @@ If any of CF, HF, and N is an input or must be preserved, the prologue saves and
 restores AF around the address calculation, as in `read_length`. The frame
 register must be preserved by the procedure's ABI. A definition with unused
 stack parameters can omit the frame. Stack parameters are read-only. The
-caller removes the argument bytes after the return. Use an `asm` block to
-prepare an outgoing stack call.
+caller removes the argument bytes after the return.
+
+### Calling with stack arguments
+
+Write arguments in the order of the callee's signature. EXX lays the stack
+arguments out by their declared offsets and evaluates them from the highest
+address to the lowest. Pass a register of the required width, or prepare it
+in place with `(register = expression)`. An unpaired byte must be in A, B, D,
+or H. A word can use BC, DE, HL, IX, or IY. Explicit stack slots can leave
+padding bytes, whose values are unspecified.
+
+```text
+extern (CF, A) probe(word: u16, tag: u8)
+(CF, A) relay(word → HL, tag → A) { return probe(word, tag) }
+```
+
+```asm
+relay:
+    push af
+    inc sp
+    push hl
+    call probe
+    inc sp
+    inc sp
+    inc sp
+    ret
+```
+
+EXX merges two adjacent bytes into a single `push` when the lower-addressed
+byte is already in the low register of BC, DE, or HL and the other byte is
+in its high register. Inline assignments keep their named registers and
+evaluation order. Register arguments are delivered after preparing the stack.
+Any explicit register-argument assignments run in signature order and must
+preserve the arguments already set up, including ones passed as bare registers.
+
+The generated call removes its outgoing bytes with `inc sp`, preserving the
+returned registers and flags. `return callee(...)` with stack arguments emits
+the call, cleanup and return in that order.
+
+### Passing a structure by value
+
+Use `TYPE { field: value, … }` for a stack parameter whose layout is defined
+by `struct`. Name every field once. Separate fields with newlines, commas,
+or semicolons. Field evaluation follows stack offset order, regardless of
+how the fields are listed. Nested structures use the same notation.
+
+```text
+struct SURFACE { mode: u8, page0: u8, page1: u8 }
+extern paint(surface: SURFACE, x: u8)
+extern data draw
+
+forward(page1 → C, x → B) clobbers(HL) {
+    head → HL
+    head = *(&draw)
+    paint(SURFACE { mode: head.lo, page0: head.hi, page1: page1 }, x)
+}
+```
+
+```asm
+forward:
+    ld hl, (draw)
+    push bc
+    push hl
+    call paint
+    inc sp
+    inc sp
+    inc sp
+    inc sp
+    ret
+```
+
+The destination width makes `head = *(&draw)` a word load. The two pushes
+carry `page1, x` and `mode, page0` respectively. An assembler-owned layout
+declared with `layout` and `field` can be read in a callee. Use an `asm`
+block to pass it by value when EXX lacks its field offsets.
 
 ### Sizes of structures passed on the stack
 
@@ -410,8 +483,8 @@ inspect:
 
 ### Tail calls
 
-Returning a call with a matching result ABI generates a jump. The destination must be reachable
-in the active memory map.
+Returning a register-only call with a matching result ABI generates a jump.
+The destination must be reachable in the active memory map.
 
 ```text
 extern A read_byte()
