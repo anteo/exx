@@ -66,8 +66,9 @@ supports it. Check the listing when opcode choice, flags, size or timing matter.
   share a `push`. EXX cleans up the arguments and preserves call results.
 - For a stack parameter of native `struct` type, pass `CELL { ch: A, attr: H }`.
   Name all fields, using the same notation for a nested structure. To load
-  two adjacent bytes explicitly, assign `head = *(&symbol)` to a word
-  register alias and use `head.lo` and `head.hi` as the field values.
+  two adjacent bytes, declare `extern data symbol: u16`, assign
+  `head = symbol` to a word register alias, and use `head.lo` and `head.hi`
+  as the field values.
 - `struct CELL { ch: u8, attr: u8 }` defines a packed layout owned by EXX.
   Native structs can contain other sized layouts. For a layout supplied by
   ASM, use `layout CELL: 2` and `field CELL.ch: u8`, or a grouped declaration

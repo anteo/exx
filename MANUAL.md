@@ -214,11 +214,11 @@ how the fields are listed. Nested structures use the same notation.
 ```text
 struct SURFACE { mode: u8, page0: u8, page1: u8 }
 extern paint(surface: SURFACE, x: u8)
-extern data draw
+extern data draw: u16
 
 forward(page1 → C, x → B) clobbers(HL) {
     head → HL
-    head = *(&draw)
+    head = draw
     paint(SURFACE { mode: head.lo, page0: head.hi, page1: page1 }, x)
 }
 ```
@@ -236,10 +236,10 @@ forward:
     ret
 ```
 
-The destination width makes `head = *(&draw)` a word load. The two pushes
-carry `page1, x` and `mode, page0` respectively. An assembler-owned layout
-declared with `layout` and `field` can be read in a callee. Use an `asm`
-block to pass it by value when EXX lacks its field offsets.
+With `draw` declared as `u16`, `head = draw` loads its first two bytes as a
+word. The two pushes carry `page1, x` and `mode, page0` respectively. An
+assembler-owned layout declared with `layout` and `field` can be read in a
+callee. Use an `asm` block to pass it by value when EXX lacks its field offsets.
 
 ### Sizes of structures passed on the stack
 
