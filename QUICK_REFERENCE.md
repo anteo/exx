@@ -37,7 +37,7 @@ extern (CF, A) probe(window → B, context: CTX → IX) clobbers(HL, F)
 | --- | --- |
 | Branch on a flag | `if (CF) return` or `if (!Z) { … }`. Test the flag directly after its producer. |
 | Compare unsigned bytes | `if (A < E) …` or `if ((A = value) == 5) …`. An operand must be A or its alias. `if (!A)` tests zero. |
-| Walk a loop | `while (condition) { … }`, `repeat(B) { … }`, `break`, or a local `name:` and `goto name`. `repeat(B)` emits DJNZ semantics, including the initial-zero case. |
+| Walk a loop | `while (condition) { … }` tests first. `do { … } while (condition)` runs the body first. `repeat(B)` emits DJNZ semantics, including the initial-zero case. `break` exits the innermost loop. A local `name:` can be reached with `goto name`. |
 | Move or update a value | `A = value`, `++row`, `A = row++`, `HL += DE`, `IY += (DE = OFFSET + BASE)`. Nested assignment makes the scratch register explicit. A postfix result needs a separate destination register. |
 | Test or change bits | `if (value$3) …`, `value$3 = 1`, `A &= mask`, `A \|= mask`, `A ^= mask`, `A = ~A`. |
 | Shift, rotate or use carry | `B >>= 2`, `sra(D)`, `rl(E)`, `rlc(B)`, `rr(E)`, `rrc(B)`, `adc(HL, DE)`, `sbc(A, E)`. Shift counts are compile-time integers. |

@@ -14,7 +14,7 @@
           "match": "\\b(goto)[ \\t]+([a-zA-Z_]\\w*)",
           "captures": { "1": { "name": "keyword.control.exx" }, "2": { "name": "entity.name.label.exx" } }
         },
-        { "name": "keyword.control.exx", "match": "\\b(?:if|else|while|repeat|break|goto|return)\\b" },
+        { "name": "keyword.control.exx", "match": "\\b(?:if|else|do|while|repeat|break|goto|return)\\b" },
         { "name": "keyword.other.exx", "match": "\\b(?:extern|data|field|clobbers|keep|asm)\\b" },
         { "name": "keyword.other.exx", "match": "\\b(?:origin\\b|(?:layout|struct|const)(?=[ \\t]+[a-zA-Z_]|[ \\t]*\\{)|frame(?=[ \\t]*\\()|stack(?=[ \\t]*\\[))" },
         { "name": "storage.type.exx", "match": "\\b(?:u8|u16)\\b" },

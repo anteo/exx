@@ -65,7 +65,10 @@ module.exports = grammar({
     _body: $ => prec.right(choice($.block, seq($._statement, optional(';')))),
     if_statement: $ => prec.right(seq('if', '(', $._expression, ')', $._body,
       optional(seq('else', $._body)))),
-    loop_statement: $ => seq(choice('while', 'repeat'), '(', $._expression, ')', $._body),
+    loop_statement: $ => choice(
+      seq(choice('while', 'repeat'), '(', $._expression, ')', $._body),
+      seq('do', $.block, 'while', '(', $._expression, ')'),
+    ),
     keep_statement: $ => seq('keep', $.name_list, $.block),
     label: $ => seq(field('name', $.identifier), ':'),
     goto_statement: $ => seq('goto', field('target', $.identifier)),

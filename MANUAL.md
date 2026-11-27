@@ -607,6 +607,37 @@ exx__example_1:
 exx__example_2:
 ```
 
+### Post-test loops
+
+`do { … } while (condition)` executes the body once before testing. The
+condition can use flags produced at the end of the body. Here each iteration
+writes a space, then tests whether the updated cursor reached a tab stop.
+
+```text
+extern data __console_x: u8
+extern put_cell(character → A) clobbers(AF, BC, DE, HL)
+
+tab() clobbers(AF, BC, DE, HL) {
+    do {
+        A = 0x20
+        put_cell(A)
+        A = __console_x
+        A &= 7
+    } while (!Z)
+}
+```
+
+```asm
+tab:
+exx__tab_1:
+    ld a, 32
+    call put_cell
+    ld a, (__console_x)
+    and 7
+    jr nz, exx__tab_1
+    ret
+```
+
 ### Counted loops
 
 `repeat` runs the body, then decrements B using `djnz`, preserving flags for the loop test. An
@@ -633,7 +664,7 @@ exx__example_1:
 
 ### Early loop exit
 
-`break` exits the innermost `while` or `repeat`. Here a zero byte exits before either HL or B changes.
+`break` exits the innermost loop. Here a zero byte exits before either HL or B changes.
 
 ```text
 repeat (B) {

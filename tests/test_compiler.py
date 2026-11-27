@@ -14,6 +14,46 @@ def instructions(procedure):
 
 
 class CompilerTests(unittest.TestCase):
+    def test_do_while_branches_directly_on_flags_from_the_body(self):
+        proc, = compile_text("""
+            extern data __console_x: u8
+            extern put_cell(character → A) clobbers(AF, BC, DE, HL)
+
+            tab() clobbers(AF, BC, DE, HL) {
+                do {
+                    A = 0x20
+                    put_cell(A)
+                    A = __console_x
+                    A &= 7
+                } while (!Z)
+            }
+        """)
+        self.assertEqual(instructions(proc), [
+            ("label", ("exx__tab_1",)),
+            ("ld", ("a", "32")),
+            ("call", ("put_cell",)),
+            ("ld", ("a", "(__console_x)")),
+            ("and", ("7",)),
+            ("jr", ("nz", "exx__tab_1")),
+            ("ret", ()),
+        ])
+
+    def test_break_from_do_while_restores_keep_and_skips_the_condition(self):
+        proc, = compile_text("""
+            B read(input → B) {
+                do {
+                    keep(BC) {
+                        B = 1
+                        break
+                    }
+                }
+                while (!Z);
+            }
+        """)
+        self.assertEqual(instructions(proc), [
+            ("push", ("bc",)), ("ld", ("b", "1")), ("pop", ("bc",)), ("ret", ()),
+        ])
+
     def test_unmodelled_registers_cannot_be_used_as_symbolic_immediates(self):
         for name in ("I", "R", "IXH", "IYL"):
             with self.subTest(name=name), self.assertRaisesRegex(ExxError, "unsupported Z80 register"):

@@ -22,7 +22,7 @@ _TOKEN = re.compile(
     r"|(?P<int>0[xX][0-9a-fA-F]+|0[bB][01]+|[0-9]+)"
     r"|(?P<punct><<=|>>=|<<|>>|->|→|\+\+|--|\|\||&&|==|!=|<=|>=|[&|^+\-]=|[(){}\[\]*:;,!+\-.^<>=&|~$])"
 )
-_KEYWORDS = frozenset({"asm", "extern", "clobbers", "if", "else", "while", "repeat", "break", "goto", "origin",
+_KEYWORDS = frozenset({"asm", "extern", "clobbers", "if", "else", "do", "while", "repeat", "break", "goto", "origin",
                        "return", "true", "false"})
 
 # Braces inside assembler strings and comments are data. The apostrophe

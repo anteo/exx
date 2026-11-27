@@ -5,7 +5,7 @@
 (builtin_type) @type.builtin
 (type_name) @type
 
-[ "if" "else" "while" "repeat" "break" "goto" "return" "keep"
+[ "if" "else" "do" "while" "repeat" "break" "goto" "return" "keep"
   "extern" "data" "field" "layout" "struct" "const" "origin" "frame" "stack" "clobbers" "asm" ] @keyword
 
 [ (arrow) (assignment_operator) (postfix_operator) "→" "->" "=" "++" "--" "+" "-" "*" "!" "~" "$"

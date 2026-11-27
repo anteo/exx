@@ -330,7 +330,7 @@ class _Parser:
             return Stmt("goto", token.line, label.value)
         if token.value == "asm":
             return Stmt("asm", token.line, self._assembly())
-        if token.value in {"if", "while", "repeat"}:
+        if token.value in {"if", "while", "do", "repeat"}:
             return self._control()
         if self._accept("break"):
             self._expect_statement_end()
@@ -365,9 +365,18 @@ class _Parser:
 
     def _control(self) -> Stmt:
         token = self._advance()
+        post_test = token.value == "do"
+        if post_test:
+            self._skip_newlines()
+            body = self._block()
+            self._skip_newlines()
+            self._expect("while")
         self._expect("(")
         condition = self._expression()
         self._expect(")")
+        if post_test:
+            self._expect_statement_end()
+            return Stmt(token.value, token.line, condition, body=body)
         body = self._body()
         otherwise = ()
         if token.value == "if" and self._accept_after_newlines("else"):

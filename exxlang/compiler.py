@@ -736,19 +736,22 @@ class Lowering:
             end, depth = self.loop_exits[-1]
             self.restore_kept(depth, stmt.line)
             self.emit(self.cpu.jump(end), stmt.line)
-        elif stmt.kind in ("while", "repeat"):
+        elif stmt.kind in ("while", "do", "repeat"):
             start, end = self.label(), self.label()
             self.mark(start, stmt.line)
             if stmt.kind == "while":
                 self.condition(stmt.value, end, False)
                 back_edge = self.cpu.jump(start)
-            else:
+            elif stmt.kind == "repeat":
                 back_edge = self.cpu.repeat_branch(self.operand(stmt.value), start)
             self.loop_exits.append((end, len(self.kept_words)))
             self.block(stmt.body)
             self.loop_exits.pop()
             self.position = stmt.end
-            self.emit(back_edge, stmt.line)
+            if stmt.kind == "do":
+                self.condition(stmt.value, start, True)
+            else:
+                self.emit(back_edge, stmt.line)
             self.mark(end, stmt.line)
         else:
             raise ExxError(stmt.line, f"unsupported statement {stmt.kind!r}")
