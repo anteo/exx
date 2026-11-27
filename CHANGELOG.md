@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.3.0
+
+### Documentation
+
+- (exx) add a quick reference for coding agents
+
+### Features
+
+- (syntax) return declared results at procedure exits
+- (abi) support incoming stack arguments
+- (layout) share structure declarations with assemblers
+- (syntax) add constant and origin declarations
+- (cli) configure generated assembly indentation
+- (asm) emit procedure-local labels for native targets
+- (syntax) support do-while loops
+- (abi) import shared declarations with use
+- (syntax) expose low and high bytes of register pairs
+- (abi) lower outgoing stack arguments
+
 ## v0.2.1
 
 ### Features
