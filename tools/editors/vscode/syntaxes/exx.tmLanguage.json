@@ -34,7 +34,7 @@
       ]
     },
     "procedure-results": {
-      "match": "^[ \\t]*(?:(extern)[ \\t]+)?([A-Z][A-Z_0-9]*|\\([ \\t]*[A-Z][A-Z_0-9]*(?:[ \\t]*,[ \\t]*[A-Z][A-Z_0-9]*)+[ \\t]*\\))(?=[ \\t]+[a-zA-Z_]\\w*[ \\t]*\\()",
+      "match": "^[ \\t]*(?:(extern)[ \\t]+)?((?:AF|BC|DE|HL)'|[A-Z][A-Z_0-9]*|\\([ \\t]*(?:(?:AF|BC|DE|HL)'|[A-Z][A-Z_0-9]*)(?:[ \\t]*,[ \\t]*(?:(?:AF|BC|DE|HL)'|[A-Z][A-Z_0-9]*))+[ \\t]*\\))(?=[ \\t]+[a-zA-Z_]\\w*[ \\t]*\\()",
       "captures": {
         "1": { "name": "keyword.other.exx" },
         "2": { "name": "meta.function.results.exx", "patterns": [{ "include": "#abi-locations" }] }
@@ -42,7 +42,7 @@
     },
     "abi-locations": {
       "patterns": [
-        { "name": "variable.language.register.exx", "match": "\\b(?:(?:AF|BC|DE|HL|[ABCDEHL]|CF|Z|S|PV|HF|N)(?:_ALT)?|F|IX|IY|SP)\\b" }
+        { "name": "variable.language.register.exx", "match": "\\b(?:(?:AF|BC|DE|HL)'(?![\\w'])|(?:AF|BC|DE|HL|[A-FHL]|CF|Z|S|PV|HF|N|IX|IY|SP)\\b(?!'))" }
       ]
     },
     "comments": {

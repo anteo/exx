@@ -16,6 +16,14 @@ class TokenizerTests(unittest.TestCase):
         self.assertEqual(tokenize(" ".join(operators)),
                          [Token("punct", op, 1) for op in operators] + [Token("eof", "", 1)])
 
+    def test_apostrophe_belongs_to_shadow_pairs(self):
+        pairs = ("AF'", "BC'", "DE'", "HL'")
+        self.assertEqual(tokenize(" ".join(pairs)),
+                         [Token("shadow_pair", pair, 1) for pair in pairs] + [Token("eof", "", 1)])
+        for invalid in ("IX'", "label'", "HL'foo"):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ExxError, "unexpected character"):
+                tokenize(invalid)
+
     def test_multiline_comments_and_arguments_preserve_source_lines(self):
         source = "(\r\n0xff, /* text\r\n */ 0b11) // end\r\n0"
         self.assertEqual(tokenize(source), [

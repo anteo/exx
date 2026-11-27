@@ -20,7 +20,7 @@ private enum SourceHighlight {
     (//[^\r\n]*|/\*[\s\S]*?(?:\*/|\z))
     | ("(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*')
     | (\b(?:extern|data|field|layout|struct|const|origin|frame|stack|asm|clobbers|keep|if|else|do|while|repeat|break|goto|return|true|false|u8|u16)\b|\buse(?=[ \t]*["{]))
-    | (\b(?:AF|BC|DE|HL|IX|IY|SP|AF_ALT|BC_ALT|DE_ALT|HL_ALT|CF|Z|PV|HF|N|S|[A-FHL])\b)
+    | (\b(?:(?:AF|BC|DE|HL)'(?![\w'])|(?:AF|BC|DE|HL|IX|IY|SP|CF|Z|PV|HF|N|S|[A-FHL])\b(?!')))
     | (\b(?:0[xX][0-9A-Fa-f]+|0[bB][01]+|[0-9]+)\b)
     | (→|->|\+\+|--)
     """#, options: .allowCommentsAndWhitespace)

@@ -1501,11 +1501,12 @@ pop(DE)
 ### Shadow registers
 
 `ex(AF)` selects `ex af,af'`. Use `exx()` to exchange BC, DE and HL with their shadow pairs together.
-Signatures can name `AF_ALT`, `BC_ALT`, `DE_ALT` and `HL_ALT`. The example writes the alternate
+Use `AF'`, `BC'`, `DE'` and `HL'` in ABI declarations and inline `asm` contracts.
+Write the apostrophe directly after the pair name. The example writes the alternate
 HL and restores the active bank.
 
 ```text
-set_alt_pointer(pointer → HL) clobbers(HL_ALT) {
+set_alt_pointer(pointer → HL) clobbers(HL') {
     push(pointer)
     exx()
     pop(HL)

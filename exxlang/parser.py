@@ -228,7 +228,7 @@ class _Parser:
         if self.token.value == "(":
             inputs = self._names(qualified=True)
         if self._accept_after_newlines("→", "->"):
-            outputs = self._names(qualified=True) if self.token.value == "(" else (self._qualified_name(),)
+            outputs = self._names(qualified=True) if self.token.value == "(" else (self._location(qualified=True),)
         if self._accept_after_newlines("clobbers"):
             clobbers = self._names(qualified=True)
         self._skip_newlines()
@@ -244,7 +244,7 @@ class _Parser:
             outputs = self._names()
             if len(outputs) < 2:
                 raise ExxError(line, "a result tuple requires at least two names")
-        elif self.token.kind == "name" and self.tokens[self.index + 1].kind == "name":
+        elif self.token.kind in ("name", "shadow_pair") and self.tokens[self.index + 1].kind == "name":
             outputs = (self._advance().value,)
         name = self._expect_name().value
         self._expect("(")
@@ -280,7 +280,7 @@ class _Parser:
             if type_name is None:
                 raise ExxError(name.line, "a parameter requires a register binding or a stack type")
             return Param(name.value, None, type_name, name.line)
-        location = self._expect_name().value
+        location = self._location()
         if location != "stack":
             return Param(name.value, location, type_name, name.line)
         if type_name is None:
@@ -296,12 +296,17 @@ class _Parser:
             parts.append(self._expect_name().value)
         return ".".join(parts)
 
+    def _location(self, *, qualified=False) -> str:
+        if self.token.kind == "shadow_pair":
+            return self._advance().value
+        return self._qualified_name() if qualified else self._expect_name().value
+
     def _names(self, *, qualified=False) -> tuple[str, ...]:
         self._expect("(")
         names = []
         if not self._accept(")"):
             while True:
-                names.append(self._qualified_name() if qualified else self._expect_name().value)
+                names.append(self._location(qualified=qualified))
                 if self._accept(")"):
                     break
                 self._expect(",")
@@ -363,7 +368,7 @@ class _Parser:
             return Stmt("keep", token.line, target, body=self._block_contents())
         if self._accept("→"):
             aliases = self._binding_names(target)
-            registers = self._names() if self.token.value == "(" else (self._expect_name().value,)
+            registers = self._names() if self.token.value == "(" else (self._location(),)
             if not aliases or len(aliases) != len(registers):
                 raise ExxError(token.line, "a binding needs one register per name")
             self._expect_statement_end()
@@ -459,6 +464,9 @@ class _Parser:
                 return item
             self._expect(",")
             return Expr("tuple", None, (item, *self._list_tail()), token.line)
+        if token.kind == "shadow_pair":
+            self._advance()
+            return Expr("name", token.value, (), token.line)
         if token.kind == "name":
             name = self._qualified_name()
             if self._accept("("):

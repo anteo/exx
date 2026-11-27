@@ -28,7 +28,7 @@ WORD_ADD_FLAGS = frozenset(("CF", "HF", "N"))
 STACK_WORD_SIZE = 2
 SHADOW_PAIRS = ("AF", "BC", "DE", "HL")
 for _pair in SHADOW_PAIRS:
-    WORD_PARTS[_pair + "_ALT"] = frozenset(part + "_ALT" for part in WORD_PARTS[_pair])
+    WORD_PARTS[_pair + "'"] = frozenset(part + "'" for part in WORD_PARTS[_pair])
 
 # Stack transfers may reinterpret a word as a different pair. Track each bit
 # so partial inputs, the six documented flags and index registers survive this.
@@ -36,13 +36,13 @@ STORAGE = {name: tuple((name, i) for i in range(width))
            for group, width in ((BYTE_REGISTERS, 8), (FLAGS, 1), (("IX", "IY", "SP"), 16))
            for name in group}
 for _part in BYTE_REGISTERS | FLAGS:
-    STORAGE[_part + "_ALT"] = tuple((_part + "_ALT", i) for _, i in STORAGE[_part])
+    STORAGE[_part + "'"] = tuple((_part + "'", i) for _, i in STORAGE[_part])
 
 
 def _word_cells(name):
     if name in INDEX_REGISTERS:
         return STORAGE[name]
-    pair = name.removesuffix("_ALT")
+    pair = name.removesuffix("'")
     suffix = name[len(pair):]
     if pair == "AF":
         # F bits 3 and 5 have no portable value in the EXX ABI.
@@ -499,7 +499,7 @@ def _transfer(name, operands):
     if (name == "ex" and names == ("AF",)) or (name == "exx" and not names):
         pairs = names or ("BC", "DE", "HL")
         active = tuple(cell for word in pairs for cell in _word_cells(word))
-        shadow = tuple(cell for word in pairs for cell in _word_cells(word + "_ALT"))
+        shadow = tuple(cell for word in pairs for cell in _word_cells(word + "'"))
         op = Transfer("swap", active, shadow)
         return (Instruction(name, ("af", "af'") if name == "ex" else (), transfer=op),)
     raise TargetError(f"unsupported register combination for {name}")

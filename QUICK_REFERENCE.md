@@ -45,7 +45,7 @@ extern (CF, A) probe(window → B, context: CTX → IX) clobbers(HL, F)
 | Test or change bits | `if (value$3) …`, `value$3 = 1`, `A &= mask`, `A \|= mask`, `A ^= mask`, `A = ~A`. |
 | Shift, rotate or use carry | `B >>= 2`, `sra(D)`, `rl(E)`, `rlc(B)`, `rr(E)`, `rrc(B)`, `adc(HL, DE)`, `sbc(A, E)`. Shift counts are compile-time integers. |
 | Save and restore | `keep(BC, AF) { … }`, or balanced `push(BC)` and `pop(BC)`. `keep` restores on every exit from its block. |
-| Exchange registers | `ex(DE, HL)`, `ex_sp(IX)`, `ex(AF)` and `exx()`. |
+| Exchange registers | `ex(DE, HL)`, `ex_sp(IX)`, `ex(AF)` and `exx()`. Name shadow pairs as `AF'`, `BC'`, `DE'` and `HL'` in ABI contracts. |
 | Port and block operations | `D = in(BC)`, `out(0xFE, A)`, `ldir(DE, HL, BC)`, `cpir(HL, A, BC)`, `inir(HL, C, B)`, `otir(C, HL, B)`. A block operation also accepts empty parentheses. |
 
 EXX chooses JR when it can prove the displacement fits and the condition

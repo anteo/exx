@@ -43,13 +43,26 @@ class TransferTests(unittest.TestCase):
             compile_source("HL f(flag → Z, a → BC) { if (flag) {push(a)} else {push(DE)}; pop(HL); return HL }")
 
     def test_shadow_bank_reads_and_external_clobbers(self):
-        compile_source("HL f(saved → HL_ALT) clobbers(HL_ALT, BC, BC_ALT, DE, DE_ALT) "
+        compile_source("HL f(saved → HL') clobbers(HL', BC, BC', DE, DE') "
                        "{ exx(); return HL }")
         with self.assertRaisesRegex(ExxError, "A unavailable"):
-            compile_source("A f() clobbers(AF, AF_ALT) { ex(AF); return A }")
+            compile_source("A f() clobbers(AF, AF') { ex(AF); return A }")
         with self.assertRaisesRegex(ExxError, "undeclared clobber"):
-            compile_source("extern work() clobbers(AF_ALT)\nf() clobbers(AF_ALT) "
+            compile_source("extern work() clobbers(AF')\nf() clobbers(AF') "
                            "{ex(AF); work(); ex(AF)}")
+
+    def test_shadow_pair_locations_in_call_and_asm_contracts(self):
+        probe, save = compile_source("""
+            extern (DE', HL') read(bank → AF') clobbers(BC')
+            (DE', HL') probe(bank → AF') clobbers(BC') { return read(AF') }
+            AF' save(value → AF) clobbers(AF) {
+                asm(value) → AF' clobbers(AF) { ex af,af' }
+            }
+        """)
+        self.assertEqual(probe.instructions[0].operands, ("read",))
+        self.assertIn("A'", save.instructions[0].writes)
+        with self.assertRaisesRegex(ExxError, "unknown ABI register HL_ALT"):
+            compile_source("f() clobbers(HL_ALT) {}")
 
     def test_io_checks_full_port_address_and_flags(self):
         with self.assertRaisesRegex(ExxError, "B unavailable"):

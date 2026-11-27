@@ -7,7 +7,7 @@ copy_bytes(source → HL, destination → DE, count → BC) {
 }
 
 // Install a new pointer in the alternate HL, preserving the active bank.
-set_alt_pointer(pointer → HL) clobbers(HL_ALT) {
+set_alt_pointer(pointer → HL) clobbers(HL') {
     push(pointer)
     exx()
     pop(HL)
